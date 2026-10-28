@@ -1,0 +1,14 @@
+# Segredos
+.env
+
+# nexo/ é um repositório Git próprio (assistente Jarvis em Python)
+nexo/
+
+# Gerados pelo gerar_briefing.py / jarvis_voz.py (dados do dia, mudam toda manhã)
+data.json
+briefing.txt
+*.mp3
+
+node_modules/
+__pycache__/
+*.log

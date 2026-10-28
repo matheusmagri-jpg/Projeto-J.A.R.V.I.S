@@ -1,0 +1,11 @@
+# O Apache do XAMPP escuta em 0.0.0.0:8080, então tudo aqui fica visível na rede.
+RewriteEngine On
+
+# Arquivos e pastas que começam com ponto (.env, .git, .claude, .htaccess)
+RewriteRule (^|/)\. - [R=404,L]
+
+# nexo/ é um app Python com servidor próprio (127.0.0.1); guarda .env, cérebro e perfil do Chrome
+RewriteRule ^nexo(/|$) - [R=404,L]
+
+# Código e anotações de trabalho: só o painel (html, js, php, data.json) precisa sair pelo Apache
+RewriteRule \.(py|mjs|cmd|md|txt|log)$ - [R=404,L]
