@@ -4,8 +4,15 @@ RewriteEngine On
 # Arquivos e pastas que começam com ponto (.env, .git, .claude, .htaccess)
 RewriteRule (^|/)\. - [R=404,L]
 
-# nexo/ é um app Python com servidor próprio (127.0.0.1); guarda .env, cérebro e perfil do Chrome
-RewriteRule ^nexo(/|$) - [R=404,L]
+# nexo/ é um app Python com servidor próprio (127.0.0.1); guarda .env, cérebro e perfil do Chrome.
+# Vale em qualquer nível: backup_jarvis_hj/ tem uma cópia inteira dela.
+RewriteRule (^|/)nexo(/|$) - [R=404,L]
+
+# habblaud/ é o código-fonte do Habblaud (roda no Docker em 127.0.0.1:4747); o Apache não serve nada dele.
+RewriteRule ^habblaud(/|$) - [R=404,L]
+
+# Backups antigos do painel não precisam sair pela rede
+RewriteRule ^(backup_jarvis_hj|_antes_da_restauracao)(/|$) - [R=404,L]
 
 # Código e anotações de trabalho: só o painel (html, js, php, data.json) precisa sair pelo Apache
-RewriteRule \.(py|mjs|cmd|md|txt|log)$ - [R=404,L]
+RewriteRule \.(py|mjs|cmd|md|txt|log|ipynb|zip)$ - [R=404,L]

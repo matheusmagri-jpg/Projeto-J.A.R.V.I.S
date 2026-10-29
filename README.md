@@ -10,6 +10,7 @@
 ![IA](https://img.shields.io/badge/IA-Claude%20%7C%20Gemini%20%7C%20DeepSeek%20%7C%20Ollama-4fe3ff?style=for-the-badge&labelColor=05141c)
 ![Cérebro](https://img.shields.io/badge/C%C3%89REBRO-Obsidian-ff8a1f?style=for-the-badge&labelColor=05141c)
 ![Voz](https://img.shields.io/badge/VOZ-Ctrl%2BAlt%2BJ-4fe3ff?style=for-the-badge&labelColor=05141c)
+![Habblaud](https://img.shields.io/badge/HABBLAUD-AO%20VIVO-ff8a1f?style=for-the-badge&labelColor=05141c)
 
 </div>
 
@@ -22,6 +23,22 @@
   <br/>
   <sub>▸ Interface principal: núcleo, cérebro em grafo, canal de comunicação e widgets.</sub>
 </div>
+
+---
+
+## 🏢 Habblaud: o escritório dos agentes
+
+<div align="center">
+  <img src="docs/habblaud-escritorio.webp" alt="Habblaud: escritório em pixel art com as salas dos projetos e os agentes do Claude Code" width="100%"/>
+  <br/>
+  <sub>▸ Habblaud: cada projeto vira uma sala, cada sessão do Claude Code vira um personagem, e o feed mostra o que cada um está fazendo.</sub>
+</div>
+
+O **[Habblaud](https://github.com/marmottajr/habblaud)** é um escritório virtual em pixel art que mostra, em tempo real, o que os agentes do Claude Code (e do Codex) estão fazendo: quem está trabalhando, quem está ocioso, quem precisa de você, o uso de 5 horas e semanal de cada conta e o feed de atividade.
+
+No JARVIS ele aparece **ao vivo dentro do painel**, num quadro da coluna lateral. A miniatura mostra a lista **Escritório**, o mapa e o feed **Atividade**. Dá para aproximar, afastar e mover o mapa ali mesmo, e o botão **↗ ABRIR** leva ao Habblaud inteiro. A instalação e o funcionamento estão em [🏢 14. Habblaud no painel](#-14-habblaud-no-painel).
+
+> 📦 O código-fonte do Habblaud está em [`habblaud/`](habblaud/): versão **1.0.3** (commit `faa1a01`), copiada sem alterações do repositório original. © 2026 Márcio Junior, licença **MIT** ([`habblaud/LICENSE`](habblaud/LICENSE)).
 
 ---
 
@@ -82,6 +99,7 @@
 11. [✅ Checklist de verificação](#-11-checklist-de-verificação)
 12. [🩺 Solução de problemas](#-12-solução-de-problemas)
 13. [🛡️ Segurança](#️-13-segurança)
+14. [🏢 Habblaud no painel](#-14-habblaud-no-painel)
 
 ### 🧭 1. Arquitetura
 
@@ -286,6 +304,7 @@ Cada botão envia um comando pronto ao JARVIS:
 | 🕒 Hora | Diz a hora |
 | 📋 Briefing | Briefing diário |
 | 🌐 CBTECH local / site | Abre o site da CBTECH (versão local ou publicada) |
+| 🏢 ↗ ABRIR (quadro Habblaud) | Abre o Habblaud inteiro no navegador |
 
 ---
 
@@ -350,12 +369,92 @@ __pycache__/
 
 ---
 
+### 🏢 14. Habblaud no painel
+
+#### 🧩 Como as peças se ligam
+
+```
+┌──────────────────────────────┐      ┌──────────────────────────────┐      ┌──────────────────────────────┐
+│ 🖥️ Painel do JARVIS           │      │ 🔁 Proxy da miniatura         │      │ 🏢 Habblaud (Docker)          │
+│ 127.0.0.1:8765               │─────▶│ 127.0.0.1:8766               │─────▶│ 127.0.0.1:4747               │
+│ quadro HABBLAUD (iframe)     │ GET  │ (porta do painel + 1)        │ GET  │ página + stream /api/stream  │
+└──────────────────────────────┘      └──────────────────────────────┘      └──────────────────────────────┘
+```
+
+O Habblaud responde com `X-Frame-Options: DENY`, que proíbe qualquer página de mostrá-lo num iframe. Por isso o JARVIS não aponta o quadro direto para ele: o servidor do painel sobe junto um **proxy pequeno** (`nexo/nexo/interface/habblaud.py`) que:
+
+- 📖 **só repassa leituras** (`GET`/`HEAD`). `POST`, `PUT`, `PATCH` e `DELETE` recebem `405`, então a miniatura nunca muda nada no Habblaud;
+- 🖼️ troca o `DENY` por `Content-Security-Policy: frame-ancestors http://127.0.0.1:8765 http://localhost:8765`. **Só o painel do JARVIS** pode exibir o Habblaud; qualquer outro site continua bloqueado;
+- 📡 deixa passar o stream ao vivo (`/api/stream`, Server-Sent Events), por isso o escritório se mexe em tempo real;
+- 🧹 não repassa `If-None-Match`/`If-Modified-Since`: a página vem sempre completa, sem cópia velha do cache do navegador;
+- 🛡️ só atende `Host` `127.0.0.1` ou `localhost` (contra DNS rebinding) e escuta apenas em `127.0.0.1`.
+
+No painel (`pagina.html`), o Habblaud é desenhado como numa tela de **1280px de largura** e encolhido com `transform: scale(...)` para caber no quadro. Assim ele mantém o layout de computador (lista, mapa e feed). A partir de uns 1040px de largura, o próprio Habblaud recolhe a lista e o feed.
+
+#### 📥 Subir o Habblaud
+
+O código está em [`habblaud/`](habblaud/). As instruções completas ficam em [`habblaud/README.pt-BR.md`](habblaud/README.pt-BR.md).
+
+```bash
+cd habblaud
+npm install           # só ferramentas de compilação; o servidor não tem dependências de runtime
+npm run docker:up     # constrói a imagem e sobe o container "habblaud" em 127.0.0.1:4747
+npm run mod:install   # opcional: uso de 5h/semanal ao vivo e responder pelo escritório
+```
+
+> 🪟 O Habblaud é testado no macOS e no Linux. Aqui ele roda no **Windows pelo Docker Desktop** (WSL 2).
+> Para ter o endereço `https://habblaud.localhost/`, um proxy local como o [portless](https://www.npmjs.com/package/portless) aponta esse nome para a porta 4747. Sem ele, use `http://localhost:4747`.
+
+#### ⚙️ Configuração no JARVIS
+
+| Onde | O quê | Padrão |
+|------|-------|--------|
+| `.env` → `NEXO_HABBLAUD_URL` | Endereço que o proxy lê | `http://127.0.0.1:4747` |
+| `servidor.py` → `SITES["habblaud"]` | Página aberta pelo **↗ ABRIR** | `https://habblaud.localhost/` |
+| Porta do proxy | Sempre a porta do painel + 1 | `8766` |
+
+#### 🎮 Controles do quadro
+
+| Ação | Efeito |
+|------|--------|
+| 🖱️ Roda do mouse no mapa | Aproxima e afasta o escritório |
+| ✋ Arrastar no mapa | Move a câmera |
+| ⌨️ `+` / `−` / setas / `0` | Zoom, mover e visão do prédio inteiro (com o quadro em foco) |
+| ➖ ➕ no título | Afasta ou aproxima a miniatura inteira (de 400 a 2400px; fica salvo) |
+| ↗ ABRIR | Abre o Habblaud inteiro no navegador |
+| ⠿⠿ / bordas | Como os outros painéis: trocar de lugar, mudar a altura e alargar a coluna |
+
+> 👀 A miniatura só lê. Para responder um agente, renomear sala ou abrir o terminal, use o **↗ ABRIR**.
+
+#### 🗂️ Arquivos da integração
+
+| Arquivo | Papel |
+|---------|-------|
+| `nexo/nexo/interface/habblaud.py` | Proxy somente leitura da miniatura |
+| `nexo/nexo/interface/servidor.py` | Sobe o proxy junto com o painel e libera o site `habblaud` no **↗ ABRIR** |
+| `nexo/nexo/interface/pagina.html` | Quadro HABBLAUD, escala de 1280px e botões − / + |
+| `nexo/nexo/config.py` | `HABBLAUD_URL` (lido de `NEXO_HABBLAUD_URL`) |
+| `.htaccess` | Bloqueia `habblaud/` no Apache: o código não sai pela rede |
+
+#### 🩺 Problemas comuns
+
+| Sintoma | Causa provável | Solução |
+|---------|----------------|---------|
+| Quadro com "Miniatura indisponível" | O painel aberto é anterior ao proxy | Feche o processo `pythonw` do JARVIS e abra de novo (fechar só a janela não basta) |
+| "Habblaud fora do ar." | Container parado | `docker ps`; se faltar, `cd habblaud && npm run docker:up` |
+| Só o mapa, sem lista e feed | Miniatura aproximada demais | Clique em ➖ no título do quadro |
+| "A porta 8766 está ocupada" no terminal | Outro programa na porta do proxy | Libere a porta ou abra o painel com `python -m nexo painel --porta 8775` (o proxy vai para a 8776) |
+
+---
+
 ## 🗺️ Roadmap
 
 - [x] 💠 HUD com núcleo animado
 - [x] 🧠 Cérebro em grafo ligado às notas
 - [x] 🔀 Integração com 4 IAs
 - [x] 🎙️ Atalho global de voz
+- [x] 🏢 Habblaud ao vivo no painel
+- [x] 🧩 Painéis que trocam de lugar e mudam de tamanho
 - [ ] ⏰ Lembretes com notificação
 - [ ] 📱 Versão para celular
 
