@@ -29,7 +29,7 @@
 ## 🏢 Habblaud: o escritório dos agentes
 
 <div align="center">
-  <img src="docs/habblaud-escritorio.webp" alt="Habblaud: escritório em pixel art com as salas dos projetos e os agentes do Claude Code" width="100%"/>
+  <img src="docs/habblaud-escritorio-2.webp" alt="Habblaud: escritório em pixel art com as salas dos projetos e os agentes do Claude Code" width="100%"/>
   <br/>
   <sub>▸ Habblaud: cada projeto vira uma sala, cada sessão do Claude Code vira um personagem, e o feed mostra o que cada um está fazendo.</sub>
 </div>
