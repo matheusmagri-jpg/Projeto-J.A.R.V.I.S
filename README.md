@@ -19,7 +19,7 @@
 ## 🛰️ Visão geral do painel
 
 <div align="center">
-  <img src="docs/jarvis-painel.png" alt="Painel principal do JARVIS" width="100%"/>
+  <img src="docs/jarvis-painel-2.webp" alt="Painel principal do JARVIS" width="100%"/>
   <br/>
   <sub>▸ Interface principal: núcleo, cérebro em grafo, canal de comunicação e widgets.</sub>
 </div>
