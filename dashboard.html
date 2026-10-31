@@ -4,87 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J.A.R.V.I.S.</title>
-<style>
-  :root{
-    --bg:#05090f; --panel:#0b1420; --line:#13324a; --cyan:#3fd5ff; --cyan-dim:#1b6f8c;
-    --text:#d8ecf5; --muted:#7c98a8; --ok:#3ee08f; --warn:#ffb547; --bad:#ff5c6c;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(circle at 50% -20%,#0d2236 0,var(--bg) 60%);color:var(--text);
-       font:15px/1.45 "Segoe UI",Roboto,system-ui,sans-serif;min-height:100vh}
-  header{display:flex;align-items:center;gap:18px;padding:20px 24px;border-bottom:1px solid var(--line)}
-  .core{width:54px;height:54px;border-radius:50%;flex:none;position:relative;
-        background:radial-gradient(circle,#bff3ff 0,var(--cyan) 30%,#0a3b52 70%);
-        box-shadow:0 0 18px var(--cyan),inset 0 0 10px #fff3}
-  .core::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:2px dashed var(--cyan-dim);animation:spin 12s linear infinite}
-  .core.speaking{animation:pulse .6s ease-in-out infinite alternate}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes pulse{to{box-shadow:0 0 40px var(--cyan),0 0 80px #3fd5ff55}}
-  h1{margin:0;font-size:20px;letter-spacing:.35em;color:var(--cyan)}
-  .sub{color:var(--muted);font-size:13px}
-  .spacer{flex:1}
-  button{background:transparent;color:var(--cyan);border:1px solid var(--cyan-dim);padding:9px 14px;border-radius:6px;
-         font:inherit;cursor:pointer;letter-spacing:.05em}
-  button:hover{background:#3fd5ff18;border-color:var(--cyan)}
-  button:disabled{cursor:not-allowed;opacity:.45}
-  .power-toggle{min-width:170px;text-transform:uppercase;font-weight:600}
-  .power-toggle.is-off{color:var(--warn);border-color:var(--warn);background:rgba(255,181,71,.08)}
-  body.system-off .card, body.system-off #briefing, body.system-off .core{opacity:.55;filter:grayscale(.15)}
-  main{padding:20px 24px;display:grid;gap:16px;grid-template-columns:repeat(12,1fr)}
-  .card{background:linear-gradient(180deg,#0d1928,var(--panel));border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
-  .card h2{margin:0 0 10px;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);font-weight:600}
-  .kpi{grid-column:span 3}
-  .kpi .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums}
-  .delta{font-size:13px}.up{color:var(--ok)}.down{color:var(--bad)}
-  .wide{grid-column:span 8}.side{grid-column:span 4}.half{grid-column:span 6}
-  ul{list-style:none;margin:0;padding:0}
-  li{padding:8px 0;border-bottom:1px solid #12263a;display:flex;gap:10px;align-items:flex-start}
-  li:last-child{border:0}
-  .tag{font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid;white-space:nowrap}
-  .t-ok{color:var(--ok);border-color:#3ee08f55}.t-warn{color:var(--warn);border-color:#ffb54755}.t-bad{color:var(--bad);border-color:#ff5c6c55}
-  #briefing{white-space:pre-wrap;color:var(--text)}
-  .demo{color:var(--warn);font-size:12px}
-  dialog{background:var(--panel);color:var(--text);border:1px solid var(--cyan-dim);border-radius:10px;max-width:460px;width:calc(100% - 32px)}
-  dialog label{display:block;margin:10px 0 4px;color:var(--muted);font-size:13px}
-  dialog input,dialog select{width:100%;padding:8px;background:#06101a;color:var(--text);border:1px solid var(--line);border-radius:6px;font:inherit}
-  main.sem-grafico .side{grid-column:span 12}
-  @media (max-width:900px){.kpi{grid-column:span 6}.wide,.side,.half{grid-column:span 12}}
-  @media (max-width:520px){header{flex-wrap:wrap;padding:16px}main{padding:16px}.kpi{grid-column:span 12}}
-  /* Floating metrics panel - added for performance monitoring */
-  .floating-metrics {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 12px;
-    z-index: 1000;
-    font-size: 12px;
-    max-height: 200px;
-    overflow-y: auto;
-    cursor: pointer;
-    transition: opacity 0.3s;
-    opacity: 0.8;
-  }
-  .floating-metrics:hover {
-    opacity: 1;
-  }
-  .metric-item {
-    display: flex;
-    justify-content: space-between;
-    margin: 4px 0;
-    padding: 4px;
-    border-bottom: 1px solid var(--line);
-  }
-  .metric-label {
-    color: var(--muted);
-  }
-  .metric-value {
-    font-weight: 600;
-    color: var(--cyan);
-  }
-</style>
+<link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
 <header>
@@ -97,29 +17,6 @@
   <button id="powerToggle" class="power-toggle" type="button" aria-pressed="true">🟢 Sistema ligado</button>
   <button id="speak">▶ Ouvir briefing</button>
   <button id="cfg">⚙ Voz</button>
-  <!-- Floating metrics panel indicator -->
-  <div class="floating-metrics" id="floating-metrics" style="display: none;">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-      <strong style="color: var(--cyan);">JARVIS Metrics</strong>
-      <span style="color: var(--muted); font-size: 10px;">Ctrl+M</span>
-    </div>
-    <div class="metric-item">
-      <span class="metric-label">Cache:</span>
-      <span class="metric-value" id="floating-cache-rate">0%</span>
-    </div>
-    <div class="metric-item">
-      <span class="metric-label">API:</span>
-      <span class="metric-value" id="floating-api-calls">0</span>
-    </div>
-    <div class="metric-item">
-      <span class="metric-label">Render:</span>
-      <span class="metric-value" id="floating-render-time">0ms</span>
-    </div>
-    <div class="metric-item">
-      <span class="metric-label">Memory:</span>
-      <span class="metric-value" id="floating-memory">0MB</span>
-    </div>
-  </div>
 </header>
 
 <main>
@@ -128,56 +25,41 @@
   <section class="card kpi"><h2>Investimento em ads</h2><div class="v" id="k-ads"></div><div class="delta" id="d-ads"></div></section>
   <section class="card kpi"><h2>ROAS</h2><div class="v" id="k-roas"></div><div class="delta" id="d-roas"></div></section>
 
-  <section class="card" id="iaChat" style="grid-column:1/-1">
+  <section class="card full-row" id="iaChat">
     <h2>Converse com o JARVIS <span class="sub" id="ia-status"></span></h2>
     <ul id="ia-log"><li class="sub">Pergunte algo e eu respondo com a IA local (Ollama).</li></ul>
-    <form id="ia-form" style="display:flex;gap:8px;margin-top:10px">
-      <input id="ia-input" type="text" placeholder="Pergunte algo ao JARVIS..." autocomplete="off"
-             style="flex:1;padding:9px 12px;background:#06101a;color:var(--text);border:1px solid var(--line);border-radius:6px;font:inherit">
+    <form id="ia-form">
+      <input id="ia-input" type="text" placeholder="Pergunte algo ao JARVIS..." autocomplete="off">
       <button type="submit" id="ia-send">Enviar</button>
     </form>
   </section>
-  <section class="card kpi"><h2 id="l-rev">Receita · 7 dias</h2><div class="v" id="k-rev"></div><div class="delta" id="d-rev"></div></section>
-  <section class="card kpi"><h2>Assinantes ativos</h2><div class="v" id="k-subs"></div><div class="delta" id="d-subs"></div></section>
-  <section class="card kpi"><h2>Investimento em ads</h2><div class="v" id="k-ads"></div><div class="delta" id="d-ads"></div></section>
-  <section class="card kpi"><h2>ROAS</h2><div class="v" id="k-roas"></div><div class="delta" id="d-roas"></div></section>
-
-  <section class="card" id="iaChat" style="grid-column:1/-1">
-    <h2>Converse com o JARVIS <span class="sub" id="ia-status"></span></h2>
-    <ul id="ia-log"><li class="sub">Pergunte algo e eu respondo com a IA local (Ollama).</li></ul>
-    <form id="ia-form" style="display:flex;gap:8px;margin-top:10px">
-      <input id="ia-input" type="text" placeholder="Pergunte algo ao JARVIS..." autocomplete="off"
-             style="flex:1;padding:9px 12px;background:#06101a;color:var(--text);border:1px solid var(--line);border-radius:6px;font:inherit">
-      <button type="submit" id="ia-send">Enviar</button>
-    </form>
-  </section>
-  <section class="card" id="cbtech" style="grid-column:1/-1;display:none"><h2>CBTECH · 7 dias <span class="sub">(direto do banco do site)</span></h2>
-    <div style="display:flex;gap:40px;flex-wrap:wrap">
-      <div><div class="sub">Matrículas</div><div class="v" style="font-size:24px" id="cb-mat"></div></div>
-      <div><div class="sub">Orçamentos</div><div class="v" style="font-size:24px" id="cb-orc"></div></div>
-      <div><div class="sub">Orçamentos atrasados</div><div class="v" style="font-size:24px" id="cb-atr"></div></div>
-      <div><div class="sub">Mensagens novas</div><div class="v" style="font-size:24px" id="cb-msg"></div></div>
-      <div><div class="sub">Chat aguardando</div><div class="v" style="font-size:24px" id="cb-chat"></div></div>
-      <div><div class="sub">Novos clientes</div><div class="v" style="font-size:24px" id="cb-cli"></div></div>
+  <section class="card full-row" id="cbtech" hidden><h2>CBTECH · 7 dias <span class="sub">(direto do banco do site)</span></h2>
+    <div class="metric-group">
+      <div><div class="sub">Matrículas</div><div class="v metric-number" id="cb-mat"></div></div>
+      <div><div class="sub">Orçamentos</div><div class="v metric-number" id="cb-orc"></div></div>
+      <div><div class="sub">Orçamentos atrasados</div><div class="v metric-number" id="cb-atr"></div></div>
+      <div><div class="sub">Mensagens novas</div><div class="v metric-number" id="cb-msg"></div></div>
+      <div><div class="sub">Chat aguardando</div><div class="v metric-number" id="cb-chat"></div></div>
+      <div><div class="sub">Novos clientes</div><div class="v metric-number" id="cb-cli"></div></div>
     </div>
-    <div class="sub" id="cb-aviso" style="margin-top:8px"></div></section>
-  <section class="card" id="social" style="grid-column:1/-1;display:none"><h2>YouTube · 7 dias <span class="sub">(Metricool)</span></h2>
-    <div style="display:flex;gap:40px;flex-wrap:wrap">
-      <div><div class="sub">Inscritos</div><div class="v" style="font-size:24px" id="yt-subs"></div></div>
-      <div><div class="sub">Visualizações</div><div class="v" style="font-size:24px" id="yt-views"></div></div>
-      <div><div class="sub">Novos inscritos</div><div class="v" style="font-size:24px" id="yt-ganhos"></div></div>
-      <div><div class="sub">Vídeos publicados</div><div class="v" style="font-size:24px" id="yt-videos"></div></div>
-      <div><div class="sub">Agendados hoje</div><div class="v" style="font-size:24px" id="yt-agendados"></div></div>
+    <div class="sub spaced-top" id="cb-aviso"></div></section>
+  <section class="card full-row" id="social" hidden><h2>YouTube · 7 dias <span class="sub">(Metricool)</span></h2>
+    <div class="metric-group">
+      <div><div class="sub">Inscritos</div><div class="v metric-number" id="yt-subs"></div></div>
+      <div><div class="sub">Visualizações</div><div class="v metric-number" id="yt-views"></div></div>
+      <div><div class="sub">Novos inscritos</div><div class="v metric-number" id="yt-ganhos"></div></div>
+      <div><div class="sub">Vídeos publicados</div><div class="v metric-number" id="yt-videos"></div></div>
+      <div><div class="sub">Agendados hoje</div><div class="v metric-number" id="yt-agendados"></div></div>
     </div></section>
-  <section class="card" id="claude" style="grid-column:1/-1;display:none"><h2>Claude Code · ao vivo <span class="sub">(J.A.R.V.I.S. do Claude Code)</span></h2>
-    <div style="display:flex;gap:40px;flex-wrap:wrap">
-      <div><div class="sub">Trabalhando agora</div><div class="v" style="font-size:24px" id="cc-ativas"></div></div>
-      <div><div class="sub">Sessões · 24h</div><div class="v" style="font-size:24px" id="cc-sessoes"></div></div>
-      <div><div class="sub">Ações hoje</div><div class="v" style="font-size:24px" id="cc-acoes"></div></div>
-      <div><div class="sub">Voz</div><div class="v" style="font-size:24px" id="cc-voz"></div></div>
+  <section class="card full-row" id="claude" hidden><h2>Claude Code · ao vivo <span class="sub">(J.A.R.V.I.S. do Claude Code)</span></h2>
+    <div class="metric-group">
+      <div><div class="sub">Trabalhando agora</div><div class="v metric-number" id="cc-ativas"></div></div>
+      <div><div class="sub">Sessões · 24h</div><div class="v metric-number" id="cc-sessoes"></div></div>
+      <div><div class="sub">Ações hoje</div><div class="v metric-number" id="cc-acoes"></div></div>
+      <div><div class="sub">Voz</div><div class="v metric-number" id="cc-voz"></div></div>
     </div>
-    <ul id="cc-lista" style="margin-top:12px"></ul></section>
-  <section class="card wide"><h2>Receita diária (R$)</h2><svg id="chart" viewBox="0 0 700 220" style="width:100%;height:auto"></svg></section>
+    <ul id="cc-lista"></ul></section>
+  <section class="card wide"><h2>Receita diária (R$)</h2><svg id="chart" viewBox="0 0 700 220"></svg></section>
   <section class="card side"><h2>Prioridades de hoje</h2><ul id="prio"></ul></section>
 
   <section class="card half"><h2>Suporte por e-mail</h2><ul id="mail"></ul></section>
@@ -186,7 +68,7 @@
 
 <dialog id="dlg">
   <form method="dialog">
-    <h3 style="margin-top:0;color:var(--cyan)">Configurar voz</h3>
+    <h3 class="dialog-title">Configurar voz</h3>
     <label>Motor de voz</label>
     <select id="engine">
       <option value="browser">Navegador (grátis, voz pt-BR do sistema)</option>
@@ -194,18 +76,18 @@
     </select>
     <label>Voz do navegador</label>
     <select id="browserVoice"></select>
-    <button type="button" id="testarVoz" style="margin-top:8px">▶ Testar</button>
+    <button type="button" id="testarVoz" class="button-spaced">▶ Testar</button>
     <label>ElevenLabs API key</label>
     <input id="elKey" type="password" placeholder="sk_..." autocomplete="off">
     <label>ElevenLabs Voice ID</label>
     <input id="elVoice" placeholder="ID da voz escolhida na Voice Library">
     <p class="sub">A chave fica só no seu navegador (localStorage). Para Fish Audio, use o script <code>jarvis_voz.py</code>.</p>
-    <button value="save">Salvar</button>
+    <button type="submit" value="save">Salvar</button>
   </form>
 </dialog>
 
 <script>
-window.onerror = (m, src, l) => { const b = document.createElement("div"); b.style.cssText = "background:#ff5c6c22;color:#ff5c6c;padding:10px 24px;font-size:13px"; b.textContent = "Erro no JARVIS: " + m + " (linha " + l + ")"; document.body.prepend(b); };
+window.onerror = (m, src, l) => { const b = document.createElement("div"); b.className = "runtime-error"; b.textContent = "Erro no JARVIS: " + m + " (linha " + l + ")"; document.body.prepend(b); };
 </script>
 <script src="jarvis.js"></script>
 </body>

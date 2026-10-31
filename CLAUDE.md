@@ -3,7 +3,7 @@
 Pasta com dois projetos do mesmo assistente, servida pelo XAMPP em `http://localhost:8080/jarvis/`.
 
 - **Raiz (este repositório):** briefing diário do JARVIS. Painel estilo Stark, voz e rotina que junta receita, ads e e-mails.
-- **`nexo/`:** o Jarvis (antes Sexta-Feira), assistente pessoal em Python com segundo cérebro no Obsidian. É um **repositório Git separado**, ignorado aqui. Para trabalhar nela, leia `nexo/CLAUDE.md`.
+- **`nexo/`:** o Jarvis (antes Sexta-Feira), assistente pessoal em Python com segundo cérebro no Obsidian. É um **repositório Git separado**, ignorado aqui; este repositório guarda só uma cópia do código dele, sem `cerebro/`, `dados/`, `.env` e `tests/audios/`. Para trabalhar nela, leia `nexo/CLAUDE.md`.
 - **`habblaud/`:** cópia sem alterações do [Habblaud](https://github.com/marmottajr/habblaud) 1.0.3 (MIT, Márcio Junior), o escritório em pixel art dos agentes do Claude Code. Roda no Docker em 127.0.0.1:4747 (`npm run docker:up` dentro da pasta); o painel do `nexo` mostra uma miniatura dele por um proxy somente leitura (`nexo/nexo/interface/habblaud.py`). Para mexer no código dele, leia `habblaud/CLAUDE.md`.
 
 ## Arquivos da raiz

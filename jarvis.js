@@ -608,14 +608,14 @@ function render() {
   const r = document.getElementById("d-roas"); r.textContent = tem(d.roasVar) ? (d.roasVar >= 0 ? "▲ " : "▼ ") + Math.abs(d.roasVar).toLocaleString("pt-BR") + " pts" : ""; r.className = "delta " + (d.roasVar >= 0 ? "up" : "down");
   d.emails = d.emails || []; d.prioridades = d.prioridades || [];
   const cb = d.cbtech;
-  document.getElementById("cbtech").style.display = cb || d.cbtechSemLogin ? "" : "none";
+  document.getElementById("cbtech").hidden = !(cb || d.cbtechSemLogin);
   set("cb-aviso", d.cbtechSemLogin ? "Entre no admin da CBTECH (/CBTECH/auth/login.php) neste navegador para ver os dados do site." : "");
   if (cb) {
     set("cb-mat", cb.matriculas7d); set("cb-orc", cb.orcamentos7d); set("cb-atr", cb.orcamentosAtrasados);
     set("cb-msg", cb.mensagensNovas); set("cb-chat", cb.chatAguardando); set("cb-cli", cb.novosClientes7d);
   }
   const yt = d.youtube;
-  document.getElementById("social").style.display = yt ? "" : "none";
+  document.getElementById("social").hidden = !yt;
   if (yt) {
     const n = v => (v ?? 0).toLocaleString("pt-BR");
     set("yt-subs", n(yt.inscritos)); set("yt-views", n(yt.views7d));
@@ -627,7 +627,7 @@ function render() {
   document.getElementById("briefing").textContent = textoBriefing(d);
   set("demo", d.demo ? "· dados de exemplo" : "");
   const g = document.getElementById("chart").closest(".card");
-  g.style.display = d.receitaDiaria ? "" : "none";
+  g.hidden = !d.receitaDiaria;
   document.querySelector("main").classList.toggle("sem-grafico", !d.receitaDiaria);
   if (d.receitaDiaria) desenharGrafico(d.receitaDiaria);
 }
@@ -637,7 +637,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", 
 function carregarClaude() {
   fetch("claude-code.php", {cache: "no-store"}).then(r => r.ok ? r.json() : null).catch(() => null).then(cc => {
     const card = document.getElementById("claude");
-    card.style.display = cc && cc.instalado ? "" : "none";
+    card.hidden = !(cc && cc.instalado);
     if (!cc || !cc.instalado) return;
     const set = (id, v) => document.getElementById(id).textContent = v;
     set("cc-ativas", cc.ativas); set("cc-sessoes", cc.sessoes24h); set("cc-acoes", cc.acoesHoje.toLocaleString("pt-BR"));
