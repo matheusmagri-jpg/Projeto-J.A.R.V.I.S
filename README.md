@@ -72,6 +72,7 @@ No JARVIS ele aparece **ao vivo dentro do painel**, num quadro da coluna lateral
 |----------|-----------|
 | `⏻ LIGADO` | Liga e desliga o JARVIS |
 | `☑ Voz` | Liga a resposta falada |
+| `Jarvis ▾` | Escolhe a voz das respostas faladas |
 | `☐ Escuta contínua` | Mantém o microfone aberto sem precisar do atalho |
 | `☐ Privado` | Força o uso apenas do modelo local |
 | `Modo: rápido` | Escolhe entre respostas rápidas e respostas mais elaboradas |
@@ -270,6 +271,19 @@ Ligado a [[Projetos]] e [[Decisões]].
 | ⌨️ **Ctrl + Alt + J** | Abre o JARVIS a partir de qualquer programa. Aperte de novo para falar |
 | 🎧 **Escuta contínua** | Microfone sempre aberto (consome mais recursos) |
 | 🔊 **Voz** | Converte a resposta em fala |
+| 🗣️ **Seletor de voz** | Troca a voz na barra superior. A escolha fica salva em `nexo/dados/voz.json` e continua valendo depois de reiniciar |
+
+**Vozes disponíveis:**
+
+| Voz | Motor |
+|-----|-------|
+| Jarvis (padrão) | Fish Audio |
+| Julius | Fish Audio |
+| Narrador do Todo Mundo Odeia o Chris | Fish Audio |
+| Capitão Nascimento | Fish Audio |
+| Antônio | Edge TTS |
+
+Para acrescentar uma voz, inclua o nome e o `modelId` do Fish Audio em `VOZES`, no arquivo `nexo/nexo/voz.py`. Se o Fish Audio falhar, a fala cai para o Antônio.
 
 **Dicas:**
 - No Windows, dê permissão de microfone em *Configurações → Privacidade → Microfone*.
@@ -453,6 +467,7 @@ npm run mod:install   # opcional: uso de 5h/semanal ao vivo e responder pelo esc
 - [x] 🧠 Cérebro em grafo ligado às notas
 - [x] 🔀 Integração com 4 IAs
 - [x] 🎙️ Atalho global de voz
+- [x] 🗣️ Seletor de voz no painel
 - [x] 🏢 Habblaud ao vivo no painel
 - [x] 🧩 Painéis que trocam de lugar e mudam de tamanho
 - [ ] ⏰ Lembretes com notificação
