@@ -1,0 +1,7 @@
+.env
+dados/
+__pycache__/
+*.tmp
+cerebro/.obsidian/workspace*.json
+arquivos/
+modelos/

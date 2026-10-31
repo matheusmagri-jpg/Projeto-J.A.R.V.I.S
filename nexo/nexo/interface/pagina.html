@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fundo: #03060c;
+    --ciano: #3de2ff;
+    --ciano-medio: rgba(61, 226, 255, .55);
+    --ciano-fraco: rgba(61, 226, 255, .18);
+    --laranja: #ff8a2b;
+    --vermelho: #ff3b4e;
+    --verde: #34f5a6;
+    --texto: #d6f6ff;
+    --suave: #6f93a8;
+    --painel: rgba(6, 18, 30, .72);
+    --cor: var(--ciano);              /* cor do estado atual */
+    --titulo: "Orbitron", "Segoe UI", sans-serif;
+    --corpo: "Rajdhani", "Segoe UI", sans-serif;
+  }
+  body[data-estado="ouvindo"] { --cor: var(--verde); }
+  body[data-estado="pensando"] { --cor: var(--laranja); }
+  body[data-estado="falando"] { --cor: #8ff0ff; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--fundo); color: var(--texto); font: 600 15px/1.35 var(--corpo); overflow: hidden;
+    background-image:
+      radial-gradient(ellipse at 50% 45%, rgba(20, 90, 130, .35), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(61, 226, 255, .045) 0 1px, transparent 1px 42px),
+      repeating-linear-gradient(90deg, rgba(61, 226, 255, .045) 0 1px, transparent 1px 42px);
+  }
+  /* linhas de varredura */
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px); }
+  button, input, select { font: inherit; color: inherit; }
+
+  /* ---------- topo ---------- */
+  .topo { display: flex; align-items: center; gap: 18px; padding: 10px 18px; height: 56px;
+    border-bottom: 1px solid var(--ciano-fraco); background: linear-gradient(180deg, rgba(61,226,255,.08), transparent); }
+  .marca { display: flex; align-items: baseline; gap: 10px; }
+  .marca h1 { margin: 0; font: 700 20px var(--titulo); letter-spacing: .28em; color: var(--ciano);
+    text-shadow: 0 0 12px var(--ciano-medio); }
+  .marca span { color: var(--suave); font-size: 12px; letter-spacing: .25em; }
+  .chips { display: flex; gap: 8px; margin: 0 auto; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--ciano-fraco); padding: 2px 10px; font-size: 12px; letter-spacing: .14em;
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); background: rgba(61,226,255,.06); }
+  .chip b { color: var(--ciano); font-weight: 700; }
+  .chip.alerta b { color: var(--laranja); }
+  .ajustes { display: flex; gap: 14px; align-items: center; font-size: 13px; color: var(--suave); letter-spacing: .06em; }
+  .ajustes label { display: flex; gap: 5px; align-items: center; cursor: pointer; white-space: nowrap; }
+  .ajustes input { accent-color: var(--ciano); }
+  .ajustes select { background: #06121e; border: 1px solid var(--ciano-fraco); }
+  #voz { max-width: 150px; }
+  .ajustes button:disabled, .atalhos button:disabled, form :disabled { cursor: not-allowed; }
+
+  /* interruptor mestre */
+  .energia { display: flex; gap: 6px; align-items: center; background: rgba(52,245,166,.08); border: 1px solid var(--verde);
+    color: var(--verde); padding: 3px 12px; cursor: pointer; font: 700 11px var(--titulo); letter-spacing: .2em;
+    box-shadow: 0 0 10px rgba(52,245,166,.25); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); }
+  .energia b { font-size: 14px; }
+  .energia:hover { background: rgba(52,245,166,.2); }
+  body.desligado .energia { color: var(--vermelho); border-color: var(--vermelho); background: rgba(255,59,78,.1);
+    box-shadow: 0 0 14px rgba(255,59,78,.4); animation: alerta 1.6s ease-in-out infinite; }
+  @keyframes alerta { 50% { box-shadow: 0 0 4px rgba(255,59,78,.2); } }
+
+  /* ---------- grade ---------- */
+  .hud { display: grid; grid-template-columns: var(--esquerda, 320px) minmax(0, 1fr) var(--direita, 320px); gap: 14px; padding: 14px 16px;
+    height: calc(100vh - 56px); }
+  .coluna { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+
+  /* arrumação livre: o pegador troca painéis de lugar, as alças alargam as colunas (salvo no navegador) */
+  .pegador { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 2; padding: 0 10px;
+    border: 0; background: none; color: var(--suave); font-size: 13px; line-height: 14px; cursor: grab;
+    opacity: 0; transition: opacity .2s; touch-action: none; }
+  .painel:hover > .pegador, .pegador:focus-visible { opacity: 1; }
+  .pegador:hover { color: var(--ciano); }
+  body.movendo, body.movendo * { cursor: grabbing !important; user-select: none; }
+  body.movendo iframe, body.alargando iframe { pointer-events: none; }
+  .painel.levado { opacity: .35; }
+  .painel.alvo { box-shadow: inset 0 0 0 2px var(--laranja), inset 0 0 30px rgba(255,138,43,.18); }  /* o clip-path corta outline */
+  .coluna.alvo { outline: 1px dashed var(--laranja); outline-offset: 4px; }
+  .alca { grid-row: 1; width: 14px; cursor: col-resize; z-index: 3; position: relative; }
+  .alca::after { content: ""; position: absolute; top: 50%; left: 6px; width: 2px; height: 46px; transform: translateY(-50%);
+    background: var(--ciano-fraco); transition: background .2s, height .2s; }
+  .alca:hover::after, body.alargando .alca::after { background: var(--ciano); height: 90px; box-shadow: 0 0 8px var(--ciano-medio); }
+  .alca[data-lado="esquerda"] { grid-column: 1; justify-self: end; margin-right: -14px; }
+  .alca[data-lado="direita"] { grid-column: 3; justify-self: start; margin-left: -14px; }
+  body.alargando { cursor: col-resize; user-select: none; }
+  /* borda de baixo de cada painel: arrastar muda a altura */
+  .redim { position: absolute; left: 14px; right: 14px; bottom: 0; height: 9px; cursor: row-resize; z-index: 2; touch-action: none; }
+  .redim::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 46px; height: 2px; transform: translateX(-50%);
+    background: var(--ciano-fraco); opacity: 0; transition: opacity .2s, width .2s; }
+  .painel:hover > .redim::after { opacity: 1; }
+  .redim:hover::after, body.esticando .redim::after { background: var(--ciano); width: 90px; box-shadow: 0 0 8px var(--ciano-medio); }
+  .painel[data-altura] { flex: none !important; overflow: auto; }
+  body.esticando, body.esticando * { cursor: row-resize !important; user-select: none; }
+  body.esticando iframe { pointer-events: none; }
+  .hud > .coluna[data-coluna="esquerda"] { grid-column: 1; grid-row: 1; }
+  .hud > .centro { grid-column: 2; grid-row: 1; }
+  .hud > .coluna[data-coluna="direita"] { grid-column: 3; grid-row: 1; }
+  .ajustes .padrao { background: none; border: 1px solid var(--ciano-fraco); color: var(--suave); padding: 1px 8px;
+    cursor: pointer; letter-spacing: .06em; }
+  .ajustes .padrao:hover { color: var(--ciano); border-color: var(--ciano); }
+  .centro { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+
+  /* ---------- painéis ---------- */
+  .painel { position: relative; background: var(--painel); border: 1px solid var(--ciano-fraco); padding: 10px 12px 12px;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); }
+  .painel::before { content: ""; position: absolute; left: 0; top: 0; width: 38px; height: 2px; background: var(--ciano); }
+  .painel::after { content: ""; position: absolute; right: 0; bottom: 0; width: 38px; height: 2px; background: var(--laranja); }
+  .painel h2 { margin: 0 0 8px; font: 700 11px var(--titulo); letter-spacing: .3em; color: var(--ciano);
+    display: flex; justify-content: space-between; }
+  .painel h2 small { color: var(--laranja); font: 600 11px var(--corpo); letter-spacing: .12em; }
+
+  /* mostrador principal */
+  .dial { position: relative; aspect-ratio: 1; max-width: 300px; width: 100%; margin: 0 auto; }
+  .dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .gira { transform-origin: 50% 50%; transform-box: view-box; animation: girar 24s linear infinite; }
+  .gira.rapido { animation-duration: 9s; }
+  .gira.contra { animation-direction: reverse; }
+  body[data-estado="pensando"] .gira { animation-duration: 3s; }
+  body[data-estado="pensando"] .gira.rapido { animation-duration: 1.4s; }
+  body[data-estado="ouvindo"] .gira.rapido { animation-duration: 4s; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  .dial .traco { stroke: var(--cor); transition: stroke .4s; }
+  .dial .miolo { position: absolute; inset: 27%; border-radius: 50%; display: grid; place-content: center; text-align: center;
+    background: radial-gradient(circle, rgba(61,226,255,.22), rgba(3,6,12,.9) 70%);
+    box-shadow: 0 0 30px var(--cor), inset 0 0 26px var(--cor); border: 2px solid var(--cor); transition: box-shadow .4s, border-color .4s; }
+  body[data-estado="falando"] .dial .miolo { animation: pulsar .9s ease-in-out infinite; }
+  body[data-estado="ouvindo"] .dial .miolo { animation: pulsar 1.6s ease-in-out infinite; }
+  @keyframes pulsar { 50% { box-shadow: 0 0 55px var(--cor), inset 0 0 40px var(--cor); } }
+  .dial .miolo strong { font: 700 clamp(12px, 1.1vw, 17px) var(--titulo); letter-spacing: .08em; color: #fff;
+    text-shadow: 0 0 10px var(--cor); white-space: nowrap; }
+  .dial .miolo span { margin-top: 4px; font-size: 12px; letter-spacing: .22em; color: var(--cor); text-transform: uppercase; }
+
+  /* sistema */
+  .medida { display: grid; grid-template-columns: 74px 1fr 52px; gap: 8px; align-items: center; font-size: 13px; margin: 5px 0; }
+  .medida em { font-style: normal; color: var(--suave); letter-spacing: .12em; }
+  .medida b { text-align: right; color: var(--ciano); font-family: var(--titulo); font-size: 12px; }
+  .barra { height: 8px; background: repeating-linear-gradient(90deg, rgba(61,226,255,.12) 0 6px, transparent 6px 8px); position: relative; }
+  .barra i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(90deg, var(--ciano) 0 6px, transparent 6px 8px);
+    box-shadow: 0 0 8px var(--ciano-medio); transition: width .8s; }
+  .barra.quente i { background: repeating-linear-gradient(90deg, var(--laranja) 0 6px, transparent 6px 8px); }
+  .rodape-sistema { margin-top: 6px; font-size: 12px; color: var(--suave); letter-spacing: .12em; }
+
+  /* atalhos */
+  .atalhos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .atalhos button { background: rgba(61,226,255,.06); border: 1px solid var(--ciano-fraco); padding: 7px 8px; cursor: pointer;
+    text-align: left; letter-spacing: .08em; font-size: 13px;
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+  .atalhos button::before { content: "▸ "; color: var(--laranja); }
+  .atalhos button:hover { background: rgba(61,226,255,.18); border-color: var(--ciano); }
+  .atalhos button[data-site]::before { content: "↗ "; color: var(--ciano); }
+  .atalhos button[data-site]:last-child { grid-column: 1 / -1; }
+
+  /* miniatura do Habblaud (proxy na porta do painel + 1): roda do mouse e arrasto vão para o escritório */
+  .habblaud { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .miniatura { position: relative; flex: 1; min-height: 120px; overflow: hidden; background: #12151d;
+    border: 1px solid var(--ciano-fraco); }
+  /* o Habblaud desenha numa tela larga (lista, escritório e feed) e o painel encolhe com scale */
+  .miniatura iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
+  .habblaud .controles { display: flex; gap: 4px; }
+  .miniatura p { margin: 0; padding: 14px; color: var(--suave); letter-spacing: .06em; }
+  .habblaud h2 button { background: none; border: 1px solid var(--ciano-fraco); padding: 0 8px; cursor: pointer;
+    color: var(--laranja); font: 600 11px var(--corpo); letter-spacing: .12em; }
+  .habblaud h2 button:hover { border-color: var(--ciano); color: var(--ciano); }
+
+  /* radar + grafo */
+  .radar-area { flex: 1; min-height: 0; display: grid; place-items: center; position: relative; }
+  .radar { position: relative; height: 100%; max-height: 100%; aspect-ratio: 1; max-width: 100%; }
+  .radar > svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  #grafo { position: absolute; inset: 7%; border-radius: 50%; overflow: hidden; }
+  .varredura { position: absolute; inset: 7%; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(from 0deg, rgba(61,226,255,.16), transparent 22%);
+    animation: girar 7s linear infinite; mix-blend-mode: screen; }
+  .rotulo-radar { position: absolute; left: 50%; bottom: 1%; transform: translateX(-50%); font-size: 12px;
+    letter-spacing: .3em; color: var(--suave); white-space: nowrap; }
+  .rotulo-radar b { color: var(--ciano); }
+
+  /* conversa */
+  .canal { display: flex; flex-direction: column; height: 30vh; min-height: 170px; flex: none; }
+  #conversa { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; flex: 1; min-height: 0; }
+  .msg { padding: 5px 9px; border-left: 2px solid var(--ciano-fraco); white-space: pre-wrap; word-wrap: break-word; }
+  .msg.voce { border-color: var(--laranja); color: #ffe2c8; }
+  .msg.voce::before { content: "VOCÊ › "; color: var(--laranja); font-family: var(--titulo); font-size: 10px; letter-spacing: .2em; }
+  .msg.nexo { border-color: var(--ciano); background: rgba(61,226,255,.05); }
+  .msg.nexo::before { content: "JARVIS › "; color: var(--ciano); font-family: var(--titulo); font-size: 10px; letter-spacing: .2em; }
+  .msg .meta { display: block; margin-top: 3px; color: var(--suave); font-size: 11px; letter-spacing: .15em; text-transform: uppercase; }
+  .msg .acao { display: block; color: var(--suave); font-size: 12px; font-family: Consolas, monospace; }
+  .aviso { align-self: center; color: var(--laranja); font-size: 12.5px; letter-spacing: .08em; }
+  .vazio { color: var(--suave); text-align: center; margin: auto; letter-spacing: .1em; }
+  .nota { color: var(--ciano); cursor: pointer; border-bottom: 1px dotted var(--ciano); }
+  code { color: var(--laranja); }
+  form { display: flex; gap: 8px; margin-top: 8px; }
+  #texto { flex: 1; min-width: 0; background: rgba(0,0,0,.35); border: 1px solid var(--ciano-fraco); padding: 9px 12px; outline: none;
+    letter-spacing: .05em; }
+  #texto:focus { border-color: var(--ciano); box-shadow: 0 0 12px var(--ciano-fraco); }
+  form button { background: rgba(61,226,255,.15); border: 1px solid var(--ciano-medio); padding: 0 16px; cursor: pointer;
+    letter-spacing: .2em; font-family: var(--titulo); font-size: 11px; min-height: 40px; }
+  form button:hover { background: rgba(61,226,255,.3); }
+  #microfone { width: 44px; padding: 0; font-size: 17px; letter-spacing: 0; }
+  #microfone:disabled { border-color: var(--verde); box-shadow: 0 0 12px var(--verde); }
+
+  /* relógio */
+  .hora { font: 700 clamp(30px, 3vw, 44px) var(--titulo); color: var(--ciano); text-shadow: 0 0 16px var(--ciano-medio); letter-spacing: .06em; }
+  .hora small { font-size: .45em; color: var(--suave); }
+  .data { color: var(--suave); letter-spacing: .18em; text-transform: uppercase; font-size: 13px; }
+  .semana { display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--titulo); font-size: 12px; color: var(--suave); }
+  .semana span { padding: 2px 5px; border: 1px solid transparent; }
+  .semana span.hoje { color: var(--fundo); background: var(--laranja); box-shadow: 0 0 12px var(--laranja); }
+
+  /* clima */
+  .clima-agora { display: flex; align-items: baseline; gap: 10px; }
+  .clima-agora strong { font: 700 34px var(--titulo); color: #fff; }
+  .clima-agora span { color: var(--ciano); text-transform: uppercase; letter-spacing: .12em; }
+  .dias { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; font-size: 13px; }
+  .dias div { border-top: 1px solid var(--ciano-fraco); padding-top: 4px; }
+  .dias em { font-style: normal; color: var(--laranja); letter-spacing: .2em; font-size: 11px; display: block; }
+
+  /* hábitos */
+  .medidor { position: relative; width: 150px; aspect-ratio: 1; margin: 2px auto 6px; }
+  .medidor svg { width: 100%; height: 100%; overflow: visible; }
+  .medidor .centro-medidor { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  .medidor strong { font: 700 26px var(--titulo); color: #fff; }
+  .medidor span { font-size: 11px; letter-spacing: .25em; color: var(--laranja); }
+  .lista { list-style: none; margin: 0; padding: 0; font-size: 13.5px; }
+  .lista li { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+  .lista li::before { content: "◇"; color: var(--suave); }
+  .lista li.feito::before { content: "◆"; color: var(--laranja); }
+  .lista li.feito { color: var(--suave); text-decoration: line-through; }
+  .lista li[data-pilar]:not(.feito) { cursor: pointer; }
+  .lista li[data-pilar]:not(.feito):hover { color: var(--ciano); }
+  .lembretes li::before { content: "⏱"; }
+  .lembretes li b { color: var(--ciano); font-family: var(--titulo); font-size: 11px; }
+
+  /* galo */
+  .galo { flex: none; }
+  .galo-tabela { display: flex; align-items: center; gap: 12px; }
+  .galo-tabela strong { font: 700 34px var(--titulo); color: var(--laranja); text-shadow: 0 0 12px rgba(255,138,43,.5); }
+  .galo-tabela b { display: block; font: 700 14px var(--titulo); color: #fff; letter-spacing: .1em; }
+  .galo-tabela span { font-size: 12.5px; color: var(--suave); letter-spacing: .08em; }
+  .galo-jogos { margin-top: 6px; }
+  .galo-jogos li::before { content: "⚽"; font-size: 11px; }
+  .galo-jogos li b { color: var(--ciano); font-family: var(--titulo); font-size: 11px; white-space: nowrap; }
+  .galo-jogos li em { font-style: normal; color: var(--suave); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+
+  /* confirmação */
+  #confirmacao { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0,0,0,.65); z-index: 60; }
+  #confirmacao.aberta { display: grid; }
+  #confirmacao > div { width: min(440px, calc(100% - 32px)); background: #071522; border: 1px solid var(--laranja);
+    box-shadow: 0 0 40px rgba(255,138,43,.35); padding: 20px;
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }
+  #confirmacao h3 { margin: 0 0 8px; font: 700 12px var(--titulo); letter-spacing: .3em; color: var(--laranja); }
+  #confirmacao p { margin: 0 0 16px; font-size: 16px; }
+  .botoes { display: flex; gap: 10px; justify-content: flex-end; }
+  .botoes button { border: 1px solid; background: transparent; padding: 8px 22px; cursor: pointer; font-family: var(--titulo);
+    letter-spacing: .2em; font-size: 12px; }
+  .botoes .sim { border-color: var(--verde); color: var(--verde); }
+  .botoes .nao { border-color: var(--vermelho); color: var(--vermelho); }
+
+  /* sistema desligado pelo interruptor: tudo em espera, cor de alerta */
+  body.desligado { --cor: var(--vermelho); }
+  body.desligado .hud { filter: saturate(.35) brightness(.7); transition: filter .6s; }
+  body.desligado .gira, body.desligado .varredura, body.desligado .dial .miolo { animation-play-state: paused; }
+  body.desligado #microfone:disabled { border-color: var(--ciano-fraco); box-shadow: none; }
+
+  .legenda { display: flex; flex-wrap: wrap; gap: 2px 10px; justify-content: center; font-size: 11px; color: var(--suave); letter-spacing: .1em; }
+  .legenda i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; transform: rotate(45deg); }
+
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: var(--ciano-fraco); }
+
+  /* telas menores: rola a página e empilha as colunas */
+  @media (max-width: 1180px) {
+    body { overflow: auto; }
+    .topo { height: auto; flex-wrap: wrap; }
+    .hud { grid-template-columns: 1fr 1fr; height: auto; }
+    .hud > .coluna[data-coluna] { grid-column: auto; grid-row: auto; overflow: visible; }
+    .hud > .centro { grid-column: 1 / -1; grid-row: auto; order: -1; }
+    .alca { display: none; }
+    .radar-area { height: min(70vw, 620px); flex: none; }
+    .canal { height: 45vh; }
+  }
+  @media (max-width: 720px) {
+    .hud { grid-template-columns: 1fr; padding: 12px 16px; }
+    .radar-area { height: calc(100vw - 32px); }
+    .ajustes { flex-wrap: wrap; }
+    .marca span { display: none; }
+  }
+</style>
+</head>
+<body data-estado="parado">
+
+<header class="topo">
+  <div class="marca"><h1 id="nome">JARVIS</h1><span>SISTEMA PESSOAL // NEXO</span></div>
+  <div class="chips">
+    <div class="chip">IA <b id="chip-ia">—</b></div>
+    <div class="chip">CÉREBRO <b id="chip-notas">—</b></div>
+    <div class="chip" id="chip-entrada-box">ENTRADA <b id="chip-entrada">—</b></div>
+    <div class="chip">FONTES <b id="chip-fontes">—</b></div>
+  </div>
+  <div class="ajustes">
+    <button type="button" id="energia" class="energia" aria-pressed="true" title="Liga ou desliga tudo: conversa, escuta e vigia">
+      <b>⏻</b> <span id="energia-texto">LIGADO</span></button>
+    <label><input type="checkbox" id="falar"> Voz</label>
+    <select id="voz" aria-label="Escolher a voz" title="Voz das respostas faladas"></select>
+    <label><input type="checkbox" id="continuo"> Escuta contínua</label>
+    <label><input type="checkbox" id="privado"> Privado</label>
+    <button type="button" class="padrao" id="layout-padrao" title="Volta os painéis e as larguras ao lugar de fábrica">↺ Layout</button>
+    <label>Modo <select id="modo"><option value="rapido">rápido</option><option value="profundo">profundo</option></select></label>
+  </div>
+</header>
+
+<main class="hud">
+  <!-- esquerda -->
+  <section class="coluna" data-coluna="esquerda">
+    <div data-painel="anel" class="painel">
+      <div class="dial" aria-hidden="true">
+        <svg viewBox="0 0 300 300">
+          <g class="gira"><circle cx="150" cy="150" r="146" fill="none" class="traco" stroke-width="1" stroke-dasharray="2 6" opacity=".7"/></g>
+          <g id="marcas" class="gira contra"></g>
+          <g class="gira rapido">
+            <circle cx="150" cy="150" r="118" fill="none" class="traco" stroke-width="6" stroke-dasharray="120 40 30 60 80 411" opacity=".9"/>
+          </g>
+          <g class="gira contra rapido">
+            <circle cx="150" cy="150" r="104" fill="none" stroke="#ff8a2b" stroke-width="3" stroke-dasharray="40 25 12 300" opacity=".85"/>
+          </g>
+          <circle cx="150" cy="150" r="94" fill="none" class="traco" stroke-width="1" opacity=".5"/>
+        </svg>
+        <div class="miolo"><strong id="nome-dial">JARVIS</strong><span id="estado-texto">Às suas ordens</span></div>
+      </div>
+    </div>
+
+    <div data-painel="sistema" class="painel">
+      <h2>SISTEMA <small id="ligado">—</small></h2>
+      <div class="medida"><em>CPU</em><div class="barra" id="b-cpu"><i style="width:0"></i></div><b id="v-cpu">—</b></div>
+      <div class="medida"><em>MEMÓRIA</em><div class="barra" id="b-ram"><i style="width:0"></i></div><b id="v-ram">—</b></div>
+      <div class="medida"><em>DISCO</em><div class="barra" id="b-disco"><i style="width:0"></i></div><b id="v-disco">—</b></div>
+      <div class="medida"><em>BATERIA</em><div class="barra" id="b-bateria"><i style="width:0"></i></div><b id="v-bateria">—</b></div>
+      <div class="rodape-sistema" id="rodape-sistema">&nbsp;</div>
+    </div>
+
+    <div data-painel="acesso" class="painel">
+      <h2>ACESSO RÁPIDO</h2>
+      <div class="atalhos">
+        <button data-dizer="Bom dia! Faça o resumo do meu dia.">Bom dia</button>
+        <button data-dizer="Como está o tempo hoje?">Clima</button>
+        <button data-dizer="Quais são os meus lembretes?">Lembretes</button>
+        <button data-dizer="Como está o meu computador?">Estado do PC</button>
+        <button data-dizer="Quais fontes você já aprendeu?">Fontes</button>
+        <button data-dizer="Abra o Obsidian.">Obsidian</button>
+        <button data-dizer="Toque uma playlist de foco.">Foco</button>
+        <button data-dizer="Que horas são?">Hora</button>
+        <button data-site="briefing" title="Painel de briefing do JARVIS (localhost:8080/jarvis)">Briefing</button>
+        <button data-site="cbtech-local" title="CBTECH no XAMPP (localhost:8080/CBTECH)">CBTECH local</button>
+        <button data-site="cbtech-site" title="cbtechsoftware.com.br/Matheus">CBTECH site</button>
+      </div>
+    </div>
+
+    <div data-painel="habblaud" class="painel habblaud">
+      <h2>HABBLAUD <span class="controles">
+        <button type="button" id="habblaud-menos" title="Afastar (mostra mais do Habblaud, menor)">−</button>
+        <button type="button" id="habblaud-mais" title="Aproximar (mostra menos do Habblaud, maior)">+</button>
+        <button data-site="habblaud" title="Abrir o Habblaud inteiro (habblaud.localhost)">↗ ABRIR</button>
+      </span></h2>
+      <div class="miniatura">
+        <iframe id="habblaud" title="Escritório do Habblaud (roda do mouse aproxima, arrastar move, tecla 0 mostra o prédio)"></iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- centro -->
+  <section class="centro">
+    <div class="radar-area">
+      <div class="radar">
+        <div id="grafo"></div>
+        <div class="varredura"></div>
+        <svg viewBox="0 0 400 400" aria-hidden="true">
+          <circle cx="200" cy="200" r="186" fill="none" stroke="rgba(61,226,255,.55)" stroke-width="1.5"/>
+          <g class="gira" style="animation-duration:60s"><circle cx="200" cy="200" r="196" fill="none" stroke="rgba(61,226,255,.35)" stroke-width="1" stroke-dasharray="1 7"/></g>
+          <g class="gira contra" style="animation-duration:40s">
+            <circle cx="200" cy="200" r="191" fill="none" stroke="#ff8a2b" stroke-width="3" stroke-dasharray="60 240 20 880" opacity=".9"/>
+          </g>
+          <g id="marcas-radar"></g>
+        </svg>
+        <div class="rotulo-radar">CÉREBRO // <b id="contagem-grafo">—</b> NÓS</div>
+      </div>
+    </div>
+
+    <div class="painel canal">
+      <h2>CANAL DE COMUNICAÇÃO <small id="provedor-ultimo"></small></h2>
+      <div id="conversa"><p class="vazio">Fale ou escreva. As notas que eu consultar acendem no cérebro.</p></div>
+      <form id="formulario">
+        <button type="button" id="microfone" title="Falar">🎙</button>
+        <input type="text" id="texto" placeholder="Escreva para o Jarvis…" autocomplete="off">
+        <button type="submit">ENVIAR</button>
+      </form>
+    </div>
+    <div class="legenda" id="legenda"></div>
+  </section>
+
+  <!-- direita -->
+  <section class="coluna" data-coluna="direita">
+    <div data-painel="relogio" class="painel">
+      <h2>RELÓGIO <small id="fuso">BRASÍLIA</small></h2>
+      <div class="hora" id="hora">--:--<small>:--</small></div>
+      <div class="data" id="data">&nbsp;</div>
+      <div class="semana" id="semana"></div>
+    </div>
+
+    <div data-painel="clima" class="painel">
+      <h2>CLIMA <small id="cidade">—</small></h2>
+      <div class="clima-agora"><strong id="temp">--°</strong><span id="condicao">carregando</span></div>
+      <div class="dias">
+        <div><em>HOJE</em><span id="hoje">—</span></div>
+        <div><em>AMANHÃ</em><span id="amanha">—</span></div>
+      </div>
+    </div>
+
+    <div data-painel="habitos" class="painel" style="flex:1; min-height:0; overflow:auto">
+      <h2>HÁBITOS <small id="habitos-data">HOJE</small></h2>
+      <div class="medidor">
+        <svg viewBox="0 0 160 160" aria-hidden="true">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="rgba(255,138,43,.15)" stroke-width="12"/>
+          <circle id="arco-habitos" cx="80" cy="80" r="70" fill="none" stroke="#ff8a2b" stroke-width="12"
+                  stroke-dasharray="0 440" transform="rotate(-90 80 80)" style="transition: stroke-dasharray .8s; filter: drop-shadow(0 0 6px #ff8a2b)"/>
+          <g class="gira contra" style="animation-duration:18s">
+            <circle cx="80" cy="80" r="54" fill="none" stroke="#ff3b4e" stroke-width="4" stroke-dasharray="30 18 8 280" opacity=".85"/>
+          </g>
+          <g class="gira" style="animation-duration:30s">
+            <circle cx="80" cy="80" r="46" fill="none" stroke="rgba(61,226,255,.6)" stroke-width="1" stroke-dasharray="2 4"/>
+          </g>
+        </svg>
+        <div class="centro-medidor"><strong id="habitos-numero">0/0</strong><span>PILARES</span></div>
+      </div>
+      <ul class="lista" id="habitos"></ul>
+      <h2 style="margin-top:12px">LEMBRETES</h2>
+      <ul class="lista lembretes" id="lembretes"><li>Nenhum agendado</li></ul>
+    </div>
+
+    <div data-painel="galo" class="painel galo">
+      <h2>GALO <small>BRASILEIRÃO</small></h2>
+      <div class="galo-tabela">
+        <strong id="galo-pos">—</strong>
+        <div><b id="galo-pts">— PTS</b><span id="galo-campanha">carregando</span></div>
+      </div>
+      <ul class="lista galo-jogos" id="galo-jogos"></ul>
+    </div>
+  </section>
+
+  <div class="alca" data-lado="esquerda" title="Arraste para alargar; dois cliques voltam ao tamanho padrão"></div>
+  <div class="alca" data-lado="direita" title="Arraste para alargar; dois cliques voltam ao tamanho padrão"></div>
+</main>
+
+<div id="confirmacao" role="dialog" aria-modal="true">
+  <div>
+    <h3>CONFIRMAÇÃO NECESSÁRIA</h3>
+    <p id="pergunta"></p>
+    <div class="botoes"><button class="nao" id="nao">NÃO</button><button class="sim" id="sim">SIM</button></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/force-graph@1.47.4/dist/force-graph.min.js"></script>
+<script>
+const CORES = {
+  mapa: "#e6fbff", nucleo: "#ff8a2b", indice: "#3de2ff", projeto: "#4f8bff", pessoa: "#34f5a6",
+  ideia: "#ffd23f", decisao: "#ff3b4e", diario: "#6f93a8", entrada: "#ff6fd8", fonte: "#b69cff", nota: "#a9c7d6",
+};
+const NOMES = { mapa: "mapa", nucleo: "núcleo", indice: "índice", projeto: "projeto", pessoa: "pessoa",
+  ideia: "ideia", decisao: "decisão", diario: "diário", entrada: "entrada", fonte: "fonte" };
+const ESTADOS = { parado: "Às suas ordens", ouvindo: "Ouvindo", pensando: "Processando", falando: "Falando" };
+const DIAS = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const ACESA_MS = 9000;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- arrumação dos painéis (fica no localStorage deste navegador) ----------
+const CHAVE_LAYOUT = "jarvis.layout";
+const hud = document.querySelector(".hud");
+const colunas = [...document.querySelectorAll("[data-coluna]")];
+const paineis = new Map([...document.querySelectorAll("[data-painel]")].map((p) => [p.dataset.painel, p]));
+
+function retratoLayout() {
+  const layout = { larguras: {}, alturas: {} };
+  for (const [nome, p] of paineis) if (p.dataset.altura) layout.alturas[nome] = Number(p.dataset.altura);
+  for (const c of colunas) {
+    layout[c.dataset.coluna] = [...c.querySelectorAll(":scope > [data-painel]")].map((p) => p.dataset.painel);
+    const largura = parseInt(hud.style.getPropertyValue("--" + c.dataset.coluna));
+    if (largura) layout.larguras[c.dataset.coluna] = largura;
+  }
+  return layout;
+}
+function definirAltura(painel, altura) {
+  if (altura) {
+    painel.dataset.altura = altura;
+    painel.style.height = altura + "px";
+  } else {
+    delete painel.dataset.altura;
+    painel.style.height = "";
+  }
+}
+function aplicarLayout(layout) {
+  for (const [nome, p] of paineis) definirAltura(p, layout.alturas?.[nome]);
+  for (const c of colunas) {
+    for (const nome of layout[c.dataset.coluna] || []) if (paineis.has(nome)) c.appendChild(paineis.get(nome));
+    const largura = layout.larguras?.[c.dataset.coluna];
+    if (largura) hud.style.setProperty("--" + c.dataset.coluna, largura + "px");
+    else hud.style.removeProperty("--" + c.dataset.coluna);
+  }
+}
+function salvarLayout() {
+  try { localStorage.setItem(CHAVE_LAYOUT, JSON.stringify(retratoLayout())); } catch {}
+}
+const LAYOUT_PADRAO = retratoLayout();
+try { aplicarLayout(JSON.parse(localStorage.getItem(CHAVE_LAYOUT)) || LAYOUT_PADRAO); } catch {}
+$("layout-padrao").addEventListener("click", () => {
+  aplicarLayout(LAYOUT_PADRAO);
+  try { localStorage.removeItem(CHAVE_LAYOUT); } catch {}
+});
+
+function trocar(a, b) {
+  const marca = document.createComment("");
+  a.replaceWith(marca);
+  b.replaceWith(a);
+  marca.replaceWith(b);
+}
+
+// Pegador: solto sobre outro painel, os dois trocam de lugar; solto no vazio de uma coluna, vai para o fim dela.
+for (const painel of paineis.values()) {
+  const pegador = Object.assign(document.createElement("button"), { type: "button", className: "pegador",
+    textContent: "⠿⠿", title: "Arraste para trocar este painel de lugar" });
+  painel.prepend(pegador);
+  pegador.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    pegador.setPointerCapture(e.pointerId);
+    document.body.classList.add("movendo");
+    painel.classList.add("levado");
+    let alvo = null;
+    const marcar = (novo) => {
+      if (alvo === novo) return;
+      alvo?.classList.remove("alvo");
+      alvo = novo;
+      alvo?.classList.add("alvo");
+    };
+    const mover = (ev) => {
+      const sob = document.elementFromPoint(ev.clientX, ev.clientY);
+      const outro = sob?.closest("[data-painel]");
+      marcar(outro ? (outro === painel ? null : outro) : sob?.closest("[data-coluna]") || null);
+    };
+    const soltar = () => {
+      pegador.removeEventListener("pointermove", mover);
+      document.body.classList.remove("movendo");
+      painel.classList.remove("levado");
+      const destino = alvo;
+      marcar(null);
+      if (!destino) return;
+      if (destino.dataset.painel) trocar(painel, destino);
+      else destino.appendChild(painel);
+      salvarLayout();
+    };
+    pegador.addEventListener("pointermove", mover);
+    pegador.addEventListener("pointerup", soltar, { once: true });
+    pegador.addEventListener("pointercancel", soltar, { once: true });
+  });
+}
+
+// Borda de baixo de cada painel: arrastar aumenta ou diminui a altura; dois cliques voltam ao automático.
+for (const painel of paineis.values()) {
+  const redim = Object.assign(document.createElement("div"), { className: "redim",
+    title: "Arraste para aumentar ou diminuir; dois cliques voltam ao tamanho automático" });
+  painel.append(redim);
+  redim.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    redim.setPointerCapture(e.pointerId);
+    document.body.classList.add("esticando");
+    const inicioY = e.clientY, inicio = painel.getBoundingClientRect().height;
+    const mover = (ev) => definirAltura(painel, Math.round(Math.max(60, inicio + ev.clientY - inicioY)));
+    const soltar = () => {
+      redim.removeEventListener("pointermove", mover);
+      document.body.classList.remove("esticando");
+      salvarLayout();
+    };
+    redim.addEventListener("pointermove", mover);
+    redim.addEventListener("pointerup", soltar, { once: true });
+    redim.addEventListener("pointercancel", soltar, { once: true });
+  });
+  redim.addEventListener("dblclick", () => {
+    definirAltura(painel, 0);
+    salvarLayout();
+  });
+}
+
+// Alças entre as colunas: arrastar alarga ou estreita; dois cliques voltam aos 320px.
+for (const alca of document.querySelectorAll(".alca")) {
+  const lado = alca.dataset.lado;
+  const coluna = colunas.find((c) => c.dataset.coluna === lado);
+  const outra = colunas.find((c) => c !== coluna);
+  alca.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    alca.setPointerCapture(e.pointerId);
+    document.body.classList.add("alargando");
+    const inicioX = e.clientX, inicio = coluna.getBoundingClientRect().width;
+    // O centro (radar e conversa) nunca fica com menos de 360px.
+    const maximo = innerWidth - 32 - 28 - outra.getBoundingClientRect().width - 360;
+    const mover = (ev) => {
+      const delta = (ev.clientX - inicioX) * (lado === "esquerda" ? 1 : -1);
+      hud.style.setProperty("--" + lado, Math.round(Math.max(220, Math.min(maximo, inicio + delta))) + "px");
+    };
+    const soltar = () => {
+      alca.removeEventListener("pointermove", mover);
+      document.body.classList.remove("alargando");
+      salvarLayout();
+    };
+    alca.addEventListener("pointermove", mover);
+    alca.addEventListener("pointerup", soltar, { once: true });
+    alca.addEventListener("pointercancel", soltar, { once: true });
+  });
+  alca.addEventListener("dblclick", () => {
+    hud.style.removeProperty("--" + lado);
+    salvarLayout();
+  });
+}
+const acesas = new Map();
+let grafo = null;
+
+$("legenda").innerHTML = Object.entries(NOMES)
+  .map(([t, n]) => `<span><i style="background:${CORES[t]}"></i>${n}</span>`).join("");
+
+// marcas (ticks) do mostrador e do radar
+function marcas(id, cx, r1, r2, n, cada) {
+  const g = $(id); let html = "";
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI, longo = i % cada === 0;
+    const ri = longo ? r1 - 6 : r1;
+    html += `<line x1="${cx + Math.cos(a) * ri}" y1="${cx + Math.sin(a) * ri}" x2="${cx + Math.cos(a) * r2}" y2="${cx + Math.sin(a) * r2}"
+      stroke="${longo ? "#3de2ff" : "rgba(61,226,255,.45)"}" stroke-width="${longo ? 2 : 1}"/>`;
+  }
+  g.innerHTML = html;
+}
+marcas("marcas", 150, 136, 142, 72, 6);
+marcas("marcas-radar", 200, 176, 182, 120, 10);
+
+// ---------- API ----------
+async function enviar(caminho, dados = {}) {
+  const r = await fetch(caminho, { method: "POST", headers: { "Content-Type": "application/json", "X-Nexo": "1" },
+    body: JSON.stringify(dados) });
+  if (!r.ok) throw new Error(caminho + " " + r.status);
+}
+const dizer = (texto) => enviar("/api/mensagem", { texto }).catch(() => adicionar("aviso", "Não consegui falar com a assistente."));
+
+// ---------- grafo ----------
+function iniciarGrafo() {
+  if (!window.ForceGraph) {
+    $("grafo").innerHTML = '<p class="vazio" style="padding-top:45%">Sem internet para carregar o grafo.</p>';
+    return;
+  }
+  grafo = ForceGraph()($("grafo"))
+    .backgroundColor("rgba(0,0,0,0)")
+    .nodeId("id")
+    .nodeVal((n) => 1 + (n.grau || 0))
+    .nodeLabel((n) => `${n.id} · ${NOMES[n.tipo] || n.tipo}`)
+    .linkColor((l) => (acesa(l.source) || acesa(l.target)) ? "rgba(255,138,43,.9)" : "rgba(61,226,255,.22)")
+    .linkWidth((l) => (acesa(l.source) || acesa(l.target)) ? 1.8 : 0.6)
+    .linkDirectionalParticles((l) => (acesa(l.source) || acesa(l.target)) ? 3 : 0)
+    .linkDirectionalParticleColor(() => "#ff8a2b")
+    .linkDirectionalParticleWidth(2.2)
+    .nodeCanvasObject(desenharNo)
+    .onNodeClick((n) => { focar(n.id); $("texto").value = `O que você sabe sobre ${n.id}?`; $("texto").focus(); })
+    .cooldownTicks(200)
+    .onEngineStop(() => { if (!enquadrado) { enquadrado = true; enquadrar(); } });
+  grafo.d3Force("charge").strength(-150);
+  grafo.d3Force("link").distance(50);
+  new ResizeObserver(redimensionar).observe($("grafo"));
+  redimensionar();
+  carregarGrafo(true);
+  setInterval(() => { if (acesas.size) { limparAcesas(); grafo.nodeColor(grafo.nodeColor()); } }, 120);
+}
+
+let reenquadrar = null;
+function redimensionar() {
+  if (!grafo) return;
+  const r = $("grafo").getBoundingClientRect();
+  grafo.width(r.width).height(r.height);
+  // o radar mudou de tamanho: enquadra o cérebro de novo para nada ficar cortado
+  clearTimeout(reenquadrar);
+  if (enquadrado) reenquadrar = setTimeout(enquadrar, 250);
+}
+
+let enquadrado = false;
+function enquadrar() {
+  grafo.zoomToFit(600, 40);
+  setTimeout(() => { if (grafo.zoom() > 3) grafo.zoom(3, 300); }, 650);
+}
+
+const acesa = (no) => { const id = typeof no === "object" ? no.id : no; return acesas.has(id) && Date.now() - acesas.get(id) < ACESA_MS; };
+function limparAcesas() { for (const [id, t] of acesas) if (Date.now() - t > ACESA_MS) acesas.delete(id); }
+
+function desenharNo(n, ctx, escala) {
+  const raio = 2.5 + Math.sqrt(1 + (n.grau || 0)) * 1.6;
+  const cor = CORES[n.tipo] || CORES.nota;
+  if (acesa(n)) {
+    const pulso = 0.5 + 0.5 * Math.sin(Date.now() / 160);
+    ctx.beginPath(); ctx.arc(n.x, n.y, raio * (2.4 + pulso), 0, 2 * Math.PI);
+    ctx.strokeStyle = `rgba(255,138,43,${0.35 + 0.4 * pulso})`; ctx.lineWidth = 1.2 / escala; ctx.stroke();
+    ctx.beginPath(); ctx.arc(n.x, n.y, raio * 1.8, 0, 2 * Math.PI);
+    ctx.fillStyle = `rgba(255,170,90,${0.15 + 0.15 * pulso})`; ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(n.x, n.y, raio, 0, 2 * Math.PI);
+  ctx.fillStyle = cor; ctx.shadowColor = acesa(n) ? "#ff8a2b" : cor; ctx.shadowBlur = acesa(n) ? 26 : 10; ctx.fill();
+  ctx.shadowBlur = 0;
+  if (acesa(n) || (n.grau || 0) >= 4 || escala > 2.2) {
+    ctx.font = `600 ${12 / escala}px Rajdhani, Segoe UI, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillStyle = acesa(n) ? "#ffd8b0" : "rgba(214,246,255,.85)";
+    ctx.fillText(n.id.toUpperCase(), n.x, n.y + raio + 2 / escala);
+  }
+}
+
+async function carregarGrafo(primeiraVez = false) {
+  if (!grafo) return;
+  const dados = await (await fetch("/api/grafo")).json();
+  const antigos = new Map(grafo.graphData().nodes.map((n) => [n.id, n]));
+  const grau = {};
+  for (const l of dados.links) { grau[l.source] = (grau[l.source] || 0) + 1; grau[l.target] = (grau[l.target] || 0) + 1; }
+  for (const n of dados.nodes) {
+    n.grau = grau[n.id] || 0;
+    const velho = antigos.get(n.id);
+    if (velho) Object.assign(n, { x: velho.x, y: velho.y, vx: velho.vx, vy: velho.vy });
+    else if (!primeiraVez) acesas.set(n.id, Date.now());
+  }
+  grafo.graphData(dados);
+  $("contagem-grafo").textContent = dados.nodes.length;
+  $("chip-notas").textContent = `${dados.nodes.length} NOTAS`;
+}
+
+function acender(notas) {
+  if (!grafo) return;
+  for (const nota of notas || []) {
+    const no = grafo.graphData().nodes.find((n) => n.id.toLowerCase() === nota.toLowerCase());
+    if (no) acesas.set(no.id, Date.now());
+  }
+}
+
+function focar(id) {
+  const no = grafo && grafo.graphData().nodes.find((n) => n.id.toLowerCase() === id.toLowerCase());
+  if (!no) return;
+  acesas.set(no.id, Date.now());
+  grafo.centerAt(no.x, no.y, 700); grafo.zoom(3, 700);
+}
+
+// ---------- conversa ----------
+const escapar = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function formatar(texto) {
+  return escapar(texto)
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, alvo, apelido) => `<span class="nota" data-nota="${alvo}">${apelido || alvo}</span>`);
+}
+function adicionar(classe, html) {
+  const vazio = document.querySelector("#conversa .vazio");
+  if (vazio) vazio.remove();
+  const el = document.createElement("div");
+  el.className = classe; el.innerHTML = html;
+  $("conversa").appendChild(el);
+  $("conversa").scrollTop = $("conversa").scrollHeight;
+}
+
+$("conversa").addEventListener("click", (e) => { const n = e.target.closest(".nota"); if (n) focar(n.dataset.nota); });
+$("formulario").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const texto = $("texto").value.trim();
+  if (!texto) return;
+  $("texto").value = "";
+  dizer(texto);
+});
+$("microfone").addEventListener("click", () => enviar("/api/ouvir").catch(() => {}));
+for (const b of document.querySelectorAll("[data-dizer]")) b.addEventListener("click", () => dizer(b.dataset.dizer));
+for (const b of document.querySelectorAll("[data-site]")) b.addEventListener("click", () =>
+  enviar("/api/abrir", { site: b.dataset.site }).catch(() => adicionar("aviso", "Não consegui abrir o site.")));
+// Proxy fora do ar (painel antigo ainda rodando): aviso no lugar do ícone de página quebrada.
+const urlHabblaud = `http://${location.hostname}:${Number(location.port) + 1}/`;
+// Largura em que o Habblaud se desenha: menor = mais perto. A partir de ~1040px ele mostra a lista e o feed.
+const CHAVE_LARGURA_HABBLAUD = "jarvis.habblaud.largura";
+let larguraHabblaud = 1280;
+try { larguraHabblaud = Number(localStorage.getItem(CHAVE_LARGURA_HABBLAUD)) || 1280; } catch {}
+function ajustarHabblaud() {
+  const quadro = $("habblaud");
+  if (!quadro) return;
+  const caixa = quadro.parentElement.getBoundingClientRect();
+  if (!caixa.width) return;
+  const escala = caixa.width / larguraHabblaud;
+  quadro.style.width = larguraHabblaud + "px";
+  quadro.style.height = Math.round(caixa.height / escala) + "px";
+  quadro.style.transform = `scale(${escala})`;
+}
+function zoomHabblaud(passo) {
+  larguraHabblaud = Math.max(400, Math.min(2400, larguraHabblaud + passo));
+  try { localStorage.setItem(CHAVE_LARGURA_HABBLAUD, larguraHabblaud); } catch {}
+  ajustarHabblaud();
+}
+$("habblaud-menos").addEventListener("click", () => zoomHabblaud(200));
+$("habblaud-mais").addEventListener("click", () => zoomHabblaud(-200));
+new ResizeObserver(ajustarHabblaud).observe(document.querySelector(".miniatura"));
+ajustarHabblaud();
+fetch(urlHabblaud, { mode: "no-cors" }).then(() => { $("habblaud").src = urlHabblaud; }).catch(() => {
+  $("habblaud").replaceWith(Object.assign(document.createElement("p"), { className: "vazio",
+    textContent: "Miniatura indisponível: reinicie o painel (feche o processo do Jarvis e abra de novo)." }));
+});
+for (const id of ["falar", "continuo", "privado"]) $(id).addEventListener("change", () => enviar("/api/ajustes", { [id]: $(id).checked }));
+$("modo").addEventListener("change", () => enviar("/api/ajustes", { modo: $("modo").value }));
+$("voz").addEventListener("change", () => enviar("/api/ajustes", { voz: $("voz").value }));
+
+// ---------- interruptor mestre ----------
+let ligado = true, nomeAssistente = "Jarvis", teclaAtalho = "";
+function aplicarEnergia(valor) {
+  ligado = valor;
+  document.body.classList.toggle("desligado", !ligado);
+  $("energia").setAttribute("aria-pressed", String(ligado));
+  $("energia-texto").textContent = ligado ? "LIGADO" : "DESLIGADO";
+  for (const el of document.querySelectorAll("#formulario input, #formulario button, .atalhos button[data-dizer], #continuo")) el.disabled = !ligado;
+  if (ligado) $("microfone").disabled = document.body.dataset.estado === "ouvindo";
+  $("estado-texto").textContent = ligado ? ESTADOS[document.body.dataset.estado] : "Em espera";
+  $("texto").placeholder = !ligado ? `${nomeAssistente} desligado. Ligue no ⏻ lá em cima.`
+    : `Escreva para ${nomeAssistente}…` + (teclaAtalho ? `  (${teclaAtalho} de qualquer programa; de novo para falar)` : "");
+}
+$("energia").addEventListener("click", () =>
+  enviar("/api/ajustes", { ligado: !ligado }).catch(() => adicionar("aviso", "Não consegui falar com o painel.")));
+$("habitos").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-pilar]:not(.feito)");
+  if (li) dizer(`Marque o hábito ${li.dataset.pilar} como feito hoje.`);
+});
+
+// ---------- confirmação ----------
+let confirmacaoAtual = null;
+function responder(resposta) {
+  if (!confirmacaoAtual) return;
+  enviar("/api/confirmar", { id: confirmacaoAtual, resposta }).catch(() => {});
+  confirmacaoAtual = null; $("confirmacao").classList.remove("aberta");
+}
+$("sim").addEventListener("click", () => responder(true));
+$("nao").addEventListener("click", () => responder(false));
+
+// ---------- relógio ----------
+function relogio() {
+  const d = new Date(), p = (x) => String(x).padStart(2, "0");
+  $("hora").innerHTML = `${p(d.getHours())}:${p(d.getMinutes())}<small>:${p(d.getSeconds())}</small>`;
+  $("data").textContent = `${DIAS[d.getDay()]} · ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
+  let semana = "";
+  for (let i = -3; i <= 3; i++) {
+    const x = new Date(d); x.setDate(d.getDate() + i);
+    semana += `<span class="${i === 0 ? "hoje" : ""}" title="${DIAS[x.getDay()]}">${p(x.getDate())}</span>`;
+  }
+  $("semana").innerHTML = semana;
+}
+setInterval(relogio, 1000); relogio();
+
+// ---------- painéis ----------
+function barra(id, valor, texto) {
+  const b = $("b-" + id), v = $("v-" + id);
+  if (valor == null) { b.firstElementChild.style.width = "0"; v.textContent = "—"; return; }
+  b.firstElementChild.style.width = Math.min(100, valor) + "%";
+  b.classList.toggle("quente", id !== "bateria" ? valor >= 85 : valor <= 20);
+  v.textContent = texto ?? Math.round(valor) + "%";
+}
+
+async function atualizarSistema() {
+  try {
+    const s = await (await fetch("/api/sistema")).json();
+    barra("cpu", s.cpu); barra("ram", s.ram); barra("disco", s.disco); barra("bateria", s.bateria);
+    const h = Math.floor(s.ligado_seg / 3600), m = Math.floor(s.ligado_seg % 3600 / 60);
+    $("ligado").textContent = `LIGADO ${h}H ${String(m).padStart(2, "0")}M`;
+    $("rodape-sistema").textContent = `${s.ram_livre_gb} GB LIVRES · DISCO ${s.disco_livre_gb} GB` +
+      (s.bateria != null ? (s.carregando ? " · CARREGANDO" : " · NA BATERIA") : "");
+  } catch {}
+}
+
+function mostrarGalo(g) {
+  const c = g && g.colocacao;
+  $("galo-pos").textContent = c ? `${c.posicao}º` : "—";
+  $("galo-pts").textContent = c ? `${c.pontos} PTS` : "— PTS";
+  $("galo-campanha").textContent = c ? `${c.jogos} J · ${c.vitorias}V ${c.empates}E ${c.derrotas}D` : "sem dados da tabela";
+  const p = (x) => String(x).padStart(2, "0");
+  $("galo-jogos").innerHTML = g && g.jogos.length ? g.jogos.map((j) => {
+    const d = new Date(j.quando);
+    const dia = `${DIAS[d.getDay()].slice(0, 3)} ${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `<li title="${escapar(j.local)}"><b>${dia}</b> ${j.em_casa ? "x" : "@"} ${escapar(j.adversario)}<em>${escapar(j.competicao)}</em></li>`;
+  }).join("") : "<li>Sem jogos marcados</li>";
+}
+
+async function atualizarPainel() {
+  try {
+    const p = await (await fetch("/api/painel")).json();
+    $("chip-entrada").textContent = p.entrada;
+    $("chip-entrada-box").classList.toggle("alerta", p.entrada > 0);
+    $("chip-fontes").textContent = p.fontes;
+    if (p.clima) {
+      const c = p.clima;
+      $("cidade").textContent = c.cidade.toUpperCase();
+      $("temp").textContent = `${c.agora}°`;
+      $("condicao").textContent = c.condicao;
+      $("hoje").textContent = `${c.hoje.min}° / ${c.hoje.max}° · chuva ${c.hoje.chuva}%`;
+      $("amanha").textContent = `${c.amanha.min}° / ${c.amanha.max}° · ${c.amanha.condicao}`;
+    } else {
+      $("condicao").textContent = "sem dados";
+    }
+    const feitos = p.habitos.filter((h) => h.feito).length, total = p.habitos.length || 1;
+    $("habitos-numero").textContent = `${feitos}/${p.habitos.length}`;
+    $("arco-habitos").setAttribute("stroke-dasharray", `${(feitos / total) * 440} 440`);
+    $("habitos").innerHTML = p.habitos.map((h) =>
+      `<li class="${h.feito ? "feito" : ""}" data-pilar="${escapar(h.pilar)}" title="${h.feito ? "Feito" : "Clique para marcar como feito"}">${escapar(h.pilar)}</li>`).join("");
+    $("lembretes").innerHTML = p.lembretes.length ? p.lembretes.map((l) => {
+      const d = new Date(l.quando);
+      return `<li><b>${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}</b> ${escapar(l.texto)}</li>`;
+    }).join("") : "<li>Nenhum agendado</li>";
+    mostrarGalo(p.galo);
+  } catch {}
+}
+
+// ---------- eventos ao vivo ----------
+function conectar() {
+  const fonte = new EventSource("/api/eventos");
+  const ouvir = (tipo, fn) => fonte.addEventListener(tipo, (e) => fn(JSON.parse(e.data)));
+  ouvir("estado", ({ estado }) => {
+    document.body.dataset.estado = estado;
+    $("estado-texto").textContent = ligado ? ESTADOS[estado] || estado : "Em espera";
+    $("microfone").disabled = !ligado || estado === "ouvindo";
+  });
+  ouvir("mensagem", (m) => {
+    if (m.de === "voce") { adicionar("msg voce", formatar(m.texto)); return; }
+    const acoes = (m.acoes || []).map((a) => `<span class="acao">· ${escapar(a)}</span>`).join("");
+    adicionar("msg nexo", acoes + formatar(m.texto) + (m.provedor ? `<span class="meta">via ${escapar(m.provedor)}</span>` : ""));
+    if (m.provedor) $("provedor-ultimo").textContent = `VIA ${m.provedor.toUpperCase()}`;
+    atualizarPainel();   // a resposta pode ter mudado hábitos, lembretes ou fontes
+  });
+  ouvir("acao", (a) => acender(a.notas));
+  ouvir("acender", (a) => acender(a.notas));
+  ouvir("grafo", () => { carregarGrafo(); atualizarPainel(); });
+  ouvir("aviso", (a) => adicionar("aviso", escapar(a.texto)));
+  ouvir("continuo", ({ ligado }) => { $("continuo").checked = ligado; });
+  ouvir("foco", () => { window.focus(); if (ligado) $("texto").focus(); });
+  ouvir("energia", (e) => {
+    aplicarEnergia(e.ligado);
+    adicionar("aviso", e.ligado ? "Sistema ligado. Às suas ordens." : "Sistema desligado: conversa, escuta e vigia em espera.");
+  });
+  ouvir("confirmar", ({ id, pergunta }) => { confirmacaoAtual = id; $("pergunta").textContent = pergunta; $("confirmacao").classList.add("aberta"); });
+  ouvir("confirmado", ({ id }) => { if (confirmacaoAtual === id) { confirmacaoAtual = null; $("confirmacao").classList.remove("aberta"); } });
+  fonte.onerror = () => { $("estado-texto").textContent = "Reconectando"; };
+  fonte.onopen = () => { $("estado-texto").textContent = ligado ? ESTADOS[document.body.dataset.estado] : "Em espera"; };
+}
+
+(async function iniciar() {
+  try {
+    const e = await (await fetch("/api/estado")).json();
+    $("falar").checked = e.falar; $("continuo").checked = e.continuo; $("privado").checked = e.privado;
+    $("modo").value = e.modo;
+    $("voz").replaceChildren(...e.vozes.map((v) => new Option(v.nome, v.id)));
+    $("voz").value = e.voz;
+    $("chip-ia").textContent = e.ias.length ? e.ias.join(" + ").toUpperCase() : "OFFLINE";
+    if (e.nome) {
+      nomeAssistente = e.nome;
+      teclaAtalho = e.tecla || "";
+      document.title = e.nome;
+      $("nome").textContent = $("nome-dial").textContent = e.nome.toUpperCase();
+      $("texto").placeholder = `Escreva para ${e.nome}…`;
+    }
+    aplicarEnergia(e.ligado !== false);
+    if (!e.ias.length) adicionar("aviso", "Nenhuma chave de IA configurada no .env.");
+  } catch {}
+  iniciarGrafo();
+  conectar();
+  atualizarSistema(); setInterval(atualizarSistema, 3000);
+  atualizarPainel(); setInterval(atualizarPainel, 60000);
+})();
+</script>
+</body>
+</html>
