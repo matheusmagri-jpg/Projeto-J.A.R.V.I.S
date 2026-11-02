@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 import tempfile
@@ -6,6 +7,26 @@ from pathlib import Path
 from unittest import mock
 
 from nexo import agente, busca, cerebro, config, ia, sessao
+
+
+def setUpModule():
+    # Estes testes simulam as IAs: as chaves reais da NVIDIA e das contas extras do Gemini ficam de fora.
+    ambiente = mock.patch.dict(os.environ)
+    ambiente.start()
+    unittest.addModuleCleanup(ambiente.stop)
+    for chave in ("NVIDIA_API_KEY", "GEMINI_AGENT_PLATFORM_KEY", "GEMINI_API_KEY_RESERVA"):
+        os.environ.pop(chave, None)
+    isolar_dados()
+
+
+def isolar_dados():
+    """O modo privado real (dados/privado.json) não pode mudar o resultado dos testes."""
+    pasta = tempfile.mkdtemp()
+    dados = mock.patch.object(config, "DADOS", Path(pasta) / "dados")
+    dados.start()
+    unittest.addModuleCleanup(dados.stop)
+    unittest.addModuleCleanup(shutil.rmtree, pasta, ignore_errors=True)
+
 
 MODELO = Path(__file__).resolve().parent.parent / "cerebro"
 
@@ -17,7 +38,9 @@ class BaseCerebro(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         shutil.copytree(MODELO, self.tmp / "cerebro")
         self.patches = [mock.patch.object(config, "CEREBRO", self.tmp / "cerebro"),
-                        mock.patch.object(config, "DADOS", self.tmp / "dados")]
+                        mock.patch.object(config, "DADOS", self.tmp / "dados"),
+                        # A busca por significado chama o Gemini: fora dos testes, salvo nos dela.
+                        mock.patch("nexo.semantica.disponivel", return_value=False)]
         for p in self.patches:
             p.start()
 
@@ -107,26 +130,65 @@ class TestIA(unittest.TestCase):
             r = ia.perguntar("oi", modo="rapido")
         self.assertEqual((r.texto, r.provedor), ("ok", "claude"))
 
-    def test_ordem_tem_ollama_primeiro(self):
-        self.assertEqual(ia.ORDEM["rapido"][0], "ollama")
-        self.assertEqual(ia.ORDEM["profundo"][0], "ollama")
+    def test_ollama_e_a_ultima_reserva_por_padrao(self):
+        ordem = ia.montar_ordem(False)
+        self.assertEqual(ordem["rapido"][0], "gemini")
+        self.assertEqual(ordem["profundo"][0], "claude")
+        self.assertEqual(ordem["rapido"][-1], "ollama")
+        self.assertEqual(ordem["profundo"][-1], "ollama")
+
+    def test_ollama_primeiro_quando_pedido(self):
+        ordem = ia.montar_ordem(True)
+        self.assertEqual(ordem["rapido"][0], "ollama")
+        self.assertEqual(ordem["profundo"][0], "ollama")
+
+    def test_sem_saldo_sai_da_lista_e_nao_e_chamada_de_novo(self):
+        chamadas = []
+
+        def sem_saldo(*_):
+            chamadas.append(1)
+            raise RuntimeError("Your credit balance is too low")
+
+        provs = {
+            "gemini": (sem_saldo, lambda: True),
+            "deepseek": (None, lambda: False),
+            "nvidia": (None, lambda: False),
+            "claude": (lambda *_: "ok", lambda: True),
+            "ollama": (None, lambda: False),
+        }
+        with mock.patch.dict(ia.PROVEDORES, provs), mock.patch.dict(ia._recusadas, clear=True):
+            ia.perguntar("primeira", modo="rapido")
+            r = ia.perguntar("segunda", modo="rapido")
+            self.assertIn("gemini", ia._recusadas)
+        self.assertEqual((r.texto, r.provedor), ("ok", "claude"))
+        self.assertEqual(len(chamadas), 1)
+
+    def test_preaquecer_nao_carrega_claude_se_tem_gemini(self):
+        with mock.patch.object(ia, "cliente") as cliente, mock.patch.object(ia, "_ping_ollama"), \
+                mock.patch.object(ia.config, "tem_gemini", lambda: True), \
+                mock.patch.object(ia.config, "tem_claude", lambda: True):
+            ia._preaquecer_worker()
+        cliente.assert_called_once_with("gemini")
+
+    def test_falha_passageira_nao_tira_a_ia_da_lista(self):
+        self.assertFalse(ia.chave_recusada("gemini", RuntimeError("HTTP 429: cota")))
 
     def test_cache_reduz_chamadas_repetidas(self):
         chamadas = []
 
-        def ollama(*_):
+        def gemini(*_):
             chamadas.append(1)
-            return "resposta local"
+            return "resposta"
 
         provs = {
-            "ollama": (ollama, lambda: True),
-            "gemini": (lambda *_: "g", lambda: True),
+            "ollama": (lambda *_: "nao deve usar", lambda: True),
+            "gemini": (gemini, lambda: True),
             "claude": (lambda *_: "c", lambda: True),
         }
         with mock.patch.dict(ia.PROVEDORES, provs):
             r1 = ia.perguntar("teste repetido", modo="rapido")
             r2 = ia.perguntar("teste repetido", modo="rapido")
-        self.assertEqual((r1.texto, r2.texto), ("resposta local", "resposta local"))
+        self.assertEqual((r1.texto, r2.texto), ("resposta", "resposta"))
         self.assertEqual(len(chamadas), 1)
 
     def test_dupla_junta_respostas(self):

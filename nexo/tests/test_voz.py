@@ -332,3 +332,25 @@ class TestFalaEmTrechos(unittest.TestCase):
                       "e ainda continua falando por bastante tempo. Terceira frase final.")
         tocadas = [e[1] for e in eventos if e[0] == "tocou"]
         self.assertEqual(tocadas, [e[1] + ".mp3" for e in eventos if e[0] == "gerou"])
+
+
+class TestTranscricao(unittest.TestCase):
+    def test_gemini_falhou_cai_no_whisper_local(self):
+        from nexo import ia
+        with mock.patch.object(ia, "privado_ativo", return_value=False), \
+             mock.patch.object(ia, "disponiveis", return_value=["gemini"]), \
+             mock.patch.object(voz, "_transcrever_gemini", side_effect=RuntimeError("cota")), \
+             mock.patch.object(voz, "whisper_disponivel", return_value=True), \
+             mock.patch.object(voz, "transcrever_local", return_value="oi") as local:
+            self.assertEqual(voz.transcrever(b"RIFF"), "oi")
+        local.assert_called_once()
+
+    def test_com_gemini_nao_carrega_o_whisper(self):
+        from nexo import ia
+        with mock.patch.object(ia, "privado_ativo", return_value=False), \
+             mock.patch.object(ia, "disponiveis", return_value=["gemini"]), \
+             mock.patch.object(voz, "_transcrever_gemini", return_value="oi") as gemini, \
+             mock.patch.object(voz, "transcrever_local") as local:
+            self.assertEqual(voz.transcrever(b"OGG", "audio/ogg"), "oi")
+        gemini.assert_called_once_with(b"OGG", "audio/ogg")
+        local.assert_not_called()

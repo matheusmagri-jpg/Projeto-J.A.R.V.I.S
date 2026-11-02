@@ -4,7 +4,8 @@ from . import Ferramenta
 
 
 def buscar_cerebro(consulta: str) -> str:
-    achados = busca.buscar(consulta, limite=5)
+    # Pedido explícito da IA: vale a chamada extra da busca por significado.
+    achados = busca.buscar(consulta, limite=5, semantica=True)
     if not achados:
         return "Nada encontrado no cérebro."
     return "\n".join(f"[[{r.titulo}]]: {r.trecho}" for r in achados)

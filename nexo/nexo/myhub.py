@@ -162,6 +162,9 @@ def _escolher_modelo(pagina, modelo: str) -> None:
 
 def perguntar(pergunta: str, modelo: str = "") -> dict:
     """Faz uma pergunta no MyHub e devolve {"texto", "modelo", "url"}."""
+    from . import ia
+    if ia.privado_ativo():
+        raise ErroMyHub("Modo privado ligado: nada foi enviado ao MyHub.")
     if uso_hoje() >= LIMITE_DIA:
         raise ErroMyHub(f"Limite de {LIMITE_DIA} consultas ao MyHub por dia atingido "
                         "(protege a conta do Matheus). Amanhã libera de novo.")

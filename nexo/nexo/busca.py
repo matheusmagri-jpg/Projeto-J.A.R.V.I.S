@@ -12,6 +12,10 @@ from . import cerebro, config
 
 BONUS_POR_LINK = 0.15  # cada nota que aponta para esta melhora um pouco a posição
 TTL_LINKS_S = 10.0
+# Abaixo disso a busca por palavras achou pouco e a busca por significado (semantica.py) entra junto.
+# Acima, ela fica de fora: cada uso custa uma chamada ao Gemini e a resposta do painel demora mais.
+MINIMO_PALAVRAS = 3
+RRF_K = 60             # fusão por posição (reciprocal rank fusion) das duas listas
 
 
 @dataclass
@@ -84,7 +88,8 @@ def _termos(consulta: str) -> list[str]:
     return [t[:max(4, len(t) - 3)] if len(t) > 4 else t for t in palavras]
 
 
-def buscar(consulta: str, limite: int = 5) -> list[Resultado]:
+def buscar(consulta: str, limite: int = 5, semantica: bool | None = None) -> list[Resultado]:
+    """Busca por palavras; semantica=None junta a busca por significado só quando as palavras acham pouco."""
     indexar()
     termos = _termos(consulta)
     if not termos:
@@ -102,7 +107,6 @@ def buscar(consulta: str, limite: int = 5) -> list[Resultado]:
             (expressao, limite * 3)).fetchall()
         if linhas:
             break
-    con.close()
 
     resultados = []
     for rel, titulo, trecho, bm25 in linhas:
@@ -110,4 +114,27 @@ def buscar(consulta: str, limite: int = 5) -> list[Resultado]:
         pontos = -bm25 * (1 + BONUS_POR_LINK * links_recebidos.get(titulo.lower(), 0))
         resultados.append(Resultado(titulo, rel, " ".join(trecho.split()), round(pontos, 3)))
     resultados.sort(key=lambda r: r.pontos, reverse=True)
+    if semantica if semantica is not None else len(resultados) < MINIMO_PALAVRAS:
+        resultados = _com_semantica(con, consulta, resultados, limite)
+    con.close()
     return resultados[:limite]
+
+
+def _com_semantica(con: sqlite3.Connection, consulta: str, por_palavras: list[Resultado],
+                   limite: int) -> list[Resultado]:
+    from . import semantica
+    parecidas = semantica.buscar(consulta, limite)
+    if not parecidas:
+        return por_palavras
+    pontos: dict[str, float] = {}
+    achados = {r.rel: r for r in por_palavras}
+    for lista in ([r.rel for r in por_palavras], [rel for rel, _ in parecidas]):
+        for posicao, rel in enumerate(lista):
+            pontos[rel] = pontos.get(rel, 0.0) + 1 / (RRF_K + posicao)
+    for rel, _ in parecidas:
+        if rel not in achados:
+            linha = con.execute("SELECT titulo, substr(corpo, 1, 240) FROM notas WHERE rel = ?", (rel,)).fetchone()
+            if linha:
+                achados[rel] = Resultado(linha[0], rel, " ".join(linha[1].split()) + "…", 0.0)
+    juntos = [Resultado(r.titulo, r.rel, r.trecho, round(pontos[rel] * 1000, 3)) for rel, r in achados.items()]
+    return sorted(juntos, key=lambda r: r.pontos, reverse=True)

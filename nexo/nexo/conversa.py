@@ -1,4 +1,4 @@
-"""Conversa com o NEXO: memória da conversa + ferramentas + Claude, Gemini, DeepSeek e Ollama.
+"""Conversa com o NEXO: memória da conversa + ferramentas + Claude, Gemini, DeepSeek, NVIDIA e Ollama.
 
 O histórico é guardado em formato neutro (só os textos), então cada turno pode ser
 atendido por qualquer uma das IAs. Dentro do turno, cada IA usa as ferramentas no
@@ -15,13 +15,14 @@ from typing import Callable
 from . import agente, atalhos, cerebro, config, ferramentas, ia
 
 MAX_PASSOS = 8
-# No modo rápido, as duas primeiras IAs da ordem começam juntas e o turno fica com a que responder
+# No modo rápido, as corredoras disponíveis começam juntas e o turno fica com a que responder
 # (ou pedir uma ferramenta) primeiro. Corta as esperas longas quando uma delas está lenta ou sem cota.
 CORRIDA = {"rapido": True, "profundo": False}
 # Só correm IAs baratas e rápidas: o Claude fica de reserva, para não pagar dois turnos a cada pergunta.
-CORREDORAS = ("gemini", "deepseek")
-# Raciocínio do Gemini por modo: mínimo no rápido (1,2 s por chamada contra 3,7 s no "low"), muito no profundo.
-PENSAMENTO_GEMINI = {"rapido": "minimal", "profundo": "high"}
+# Com três, o Gemini sozinho e lento não segura o turno quando o DeepSeek cai (sem saldo, por exemplo).
+CORREDORAS = ("gemini", "deepseek", "nvidia")
+# Raciocínio do Gemini por modo: pouco no rápido (3,7 s por chamada contra 1,2 s no "minimal", mas erra menos), muito no profundo.
+PENSAMENTO_GEMINI = {"rapido": "low", "profundo": "high"}
 INSTRUCOES = (
     f"\n\nVocê está conversando com o usuário agora; chame-o de {config.TRATAMENTO}. Responda curto, "
     "como se fosse falado. Use as ferramentas quando precisar: para qualquer fato sobre o usuário, os projetos ou o "
@@ -62,7 +63,8 @@ class Conversa:
         self.modo = modo
         # A interface recebe aqui o que o NEXO está fazendo (ex.: quais notas consultou).
         self.ao_evento = ao_evento or (lambda tipo, dados: None)
-        self.privado = privado
+        if privado:   # desligado não apaga o que o painel ou a vigia já ligaram
+            self.privado = True
         # Sem interface para perguntar, ações que pedem confirmação são negadas.
         self.confirmar = confirmar or (lambda pergunta: False)
         self.ferramentas = ferramentas_disponiveis if ferramentas_disponiveis is not None else ferramentas.carregar()
@@ -70,6 +72,15 @@ class Conversa:
         self._acoes: list[str] = []
         self._dono: str | None = None        # IA que ficou com o turno atual
         self._trava_dono = threading.Lock()
+
+    @property
+    def privado(self) -> bool:
+        """Modo privado: só o Ollama responde e nada vai para o diário. Vale para o PC todo (dados/privado.json)."""
+        return ia.privado_ativo()
+
+    @privado.setter
+    def privado(self, ligado: bool) -> None:
+        ia.definir_privado(ligado)
 
     # ---------- turno ----------
 
@@ -88,24 +99,28 @@ class Conversa:
         candidatas = [n for n in ordem if n in ia.disponiveis()]
         erros: list[str] = []
         self._acoes = []
-        par = [n for n in candidatas[:2] if n in CORREDORAS]
-        if CORRIDA.get(self.modo) and len(par) == 2:
-            turno = self._corrida(par, sistema, mensagem, erros)
+        corredoras = [n for n in candidatas if n in CORREDORAS]
+        if CORRIDA.get(self.modo) and len(corredoras) >= 2:
+            turno = self._corrida(corredoras, sistema, mensagem, erros)
             if turno:
                 return self._reforco_myhub(mensagem, turno)
-            candidatas = candidatas[2:]
+            candidatas = [n for n in candidatas if n not in corredoras]
         for nome in candidatas:
             self._dono, self._acoes = None, []
             turno = self._tentar(nome, sistema, mensagem, erros)
             if turno:
                 return self._reforco_myhub(mensagem, turno)
+        if self.privado:
+            motivo = "\n".join(erros) or "o Ollama está desligado (NEXO_OLLAMA_ATIVO)."
+            raise ia.ModoPrivado("Modo privado ligado: o Ollama local não respondeu e nada foi enviado à nuvem.\n"
+                                 + motivo)
         if not erros:
             raise ia.SemIA("Nenhuma chave de IA configurada. Preencha o .env.")
         raise ia.SemIA("Todas as IAs falharam:\n" + "\n".join(erros))
 
     def _reforco_myhub(self, mensagem: str, turno: Turno) -> Turno:
         """Se a resposta foi "não achei", pergunta às IAs do MyHub (conta salva) e responde com o que vier."""
-        if "consultar_myhub" not in self.ferramentas or not NAO_ACHOU.search(turno.texto):
+        if self.privado or "consultar_myhub" not in self.ferramentas or not NAO_ACHOU.search(turno.texto):
             return turno
         if any(a.startswith("consultar_myhub") for a in turno.acoes):
             return turno   # a IA já tentou o MyHub neste turno
@@ -132,7 +147,7 @@ class Conversa:
         """Uma IA atende o turno. None quando ela falhou antes de agir (a próxima pode tentar)."""
         self.ao_evento("pensando", {"provedor": nome})
         laco = {"claude": self._laco_claude, "gemini": self._laco_gemini,
-                "deepseek": self._laco_deepseek}.get(nome, self._laco_ollama)
+                "deepseek": self._laco_deepseek, "nvidia": self._laco_deepseek}.get(nome, self._laco_ollama)
         try:
             texto = laco(sistema, mensagem, nome)
         except _Perdeu:
@@ -152,7 +167,7 @@ class Conversa:
         return Turno(texto, nome, list(self._acoes))
 
     def _corrida(self, nomes: list[str], sistema: str, mensagem: str, erros: list[str]) -> Turno | None:
-        """As duas IAs começam juntas; fica com o turno a primeira que responder ou pedir uma ferramenta."""
+        """As IAs começam juntas; fica com o turno a primeira que responder ou pedir uma ferramenta."""
         self._dono = None
         pool = ThreadPoolExecutor(len(nomes), thread_name_prefix="nexo-corrida")
         pendentes = {pool.submit(self._tentar, n, sistema, mensagem, erros) for n in nomes}
@@ -246,7 +261,8 @@ class Conversa:
             thinking_config=types.ThinkingConfig(thinking_level=PENSAMENTO_GEMINI.get(self.modo, "low")),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
         for _ in range(MAX_PASSOS):
-            r = ia.gerar_gemini(conteudo, ajustes)
+            r = ia.gerar_gemini(conteudo, ajustes, ia.modelos_gemini(self.modo),
+                                ia.HEDGE_PROFUNDO_S if self.modo == "profundo" else None)
             chamadas = r.function_calls or []
             self._vez(nome)
             if not chamadas:
@@ -263,7 +279,7 @@ class Conversa:
     # ---------- DeepSeek ----------
 
     def _laco_deepseek(self, sistema: str, mensagem: str, nome: str = "deepseek") -> str:
-        """DeepSeek com ferramentas, no formato da OpenAI (tools / tool_calls)."""
+        """DeepSeek ou NVIDIA com ferramentas, no formato da OpenAI (tools / tool_calls)."""
         msgs = [{"role": "system", "content": sistema}]
         msgs += [{"role": "user" if p == "usuario" else "assistant", "content": t} for p, t in self.historico]
         msgs.append({"role": "user", "content": mensagem})
@@ -273,14 +289,18 @@ class Conversa:
             corpo = {"messages": msgs, "max_tokens": 2048, "temperature": 0.6}
             if tools:
                 corpo["tools"] = tools
-            escolha = (ia.chamar_deepseek(corpo, timeout=45.0).get("choices") or [{}])[0]
+            if nome == "nvidia":
+                resposta = ia.chamar_nvidia(corpo, self.modo, timeout=45.0)
+            else:
+                resposta = ia.chamar_deepseek(corpo, timeout=45.0)
+            escolha = (resposta.get("choices") or [{}])[0]
             msg = escolha.get("message") or {}
             chamadas = msg.get("tool_calls") or []
             self._vez(nome)
             if not chamadas:
-                texto = (msg.get("content") or "").strip()
+                texto = ia.sem_raciocinio(msg.get("content") or "")
                 if not texto:
-                    raise RuntimeError("DeepSeek devolveu resposta vazia")
+                    raise RuntimeError(f"{nome} devolveu resposta vazia")
                 return texto
             msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": chamadas})
             for c in chamadas:

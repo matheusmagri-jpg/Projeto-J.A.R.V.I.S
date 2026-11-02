@@ -451,6 +451,17 @@ def cmd_fish(a):
             voz._tocar_mp3(arquivo)
 
 
+def cmd_telegram(a):
+    from . import telegram
+    if not config.TELEGRAM_TOKEN:
+        print("Falta NEXO_TELEGRAM_TOKEN no .env (crie o bot com o @BotFather).")
+    elif not config.TELEGRAM_CHAT:
+        print("Token ok. Abra o painel e mande uma mensagem ao bot: ele responde com o número para NEXO_TELEGRAM_CHAT.")
+    else:
+        ok = telegram.enviar(a.texto or f"Teste do {config.NOME}: o Telegram está funcionando, {config.TRATAMENTO}.")
+        print("Mensagem enviada." if ok else "Não consegui enviar: confira o token e o número do chat.")
+
+
 def cmd_myhub(a):
     from . import myhub
     if a.acao == "login":
@@ -507,6 +518,7 @@ def main(argv=None):
 
     s = sub.add_parser("fish"); s.add_argument("acao", choices=["login", "status", "testar"])
     s.add_argument("texto", nargs="?", default=""); s.set_defaults(f=cmd_fish)
+    s = sub.add_parser("telegram"); s.add_argument("texto", nargs="?", default=""); s.set_defaults(f=cmd_telegram)
     s = sub.add_parser("myhub"); s.add_argument("acao", choices=["login", "perguntar", "status"])
     s.add_argument("texto", nargs="?", default=""); s.add_argument("--modelo", default="")
     s.set_defaults(f=cmd_myhub)

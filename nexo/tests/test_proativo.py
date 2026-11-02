@@ -19,6 +19,12 @@ class BaseProativo(BaseCerebro):
         n = mock.patch.object(proativo, "notificar", return_value=True)
         n.start()
         self.addCleanup(n.stop)
+        # Agenda e e-mail do .env real nunca entram nos testes.
+        for nome, valor in (("AGENDA_ICS", []), ("EMAIL_USUARIO", ""), ("EMAIL_SENHA", ""),
+                            ("TELEGRAM_TOKEN", ""), ("TELEGRAM_CHAT", "")):
+            c = mock.patch.object(config, nome, valor)
+            c.start()
+            self.addCleanup(c.stop)
 
     def andar(self, **delta):
         self.relogio[0] += dt.timedelta(**delta)
@@ -151,3 +157,56 @@ class TestVigia(BaseProativo):
         self.assertIn("Lembrete, senhor: tomar água", avisos)
         self.assertEqual(avisos.count("Bom dia!"), 1)
         refletir.assert_called_once_with("2026-10-26")
+
+
+class TestTarefas(BaseProativo):
+    # AGORA é terça, 27/10/2026, 9h.
+    def test_tarefa_diaria_roda_uma_vez_por_dia(self):
+        self.assertIn("todo dia às 10:00", proativo.agendar_tarefa("pesquisar o dólar", "10h"))
+        self.assertEqual(proativo.tarefas_vencidas(), [])
+        self.andar(hours=1)
+        self.assertEqual([t["pedido"] for t in proativo.tarefas_vencidas()], ["pesquisar o dólar"])
+        self.assertEqual(proativo.tarefas_vencidas(), [])          # não repete no mesmo dia
+        self.andar(days=1)
+        self.assertEqual(len(proativo.tarefas_vencidas()), 1)      # volta no dia seguinte
+        self.assertIn("1. todo dia às 10:00", proativo.listar_tarefas())
+
+    def test_dias_da_semana_e_uma_vez(self):
+        proativo.agendar_tarefa("resumir e-mails", "9:30", "seg,qua")
+        proativo.agendar_tarefa("ver o tempo", "9:30", "uma_vez")
+        self.andar(minutes=30)                                       # terça 9h30
+        self.assertEqual([t["pedido"] for t in proativo.tarefas_vencidas()], ["ver o tempo"])
+        self.assertNotIn("ver o tempo", proativo.listar_tarefas())   # a de uma vez sai da lista
+        self.andar(days=1)                                           # quarta
+        self.assertEqual([t["pedido"] for t in proativo.tarefas_vencidas()], ["resumir e-mails"])
+
+    def test_atraso_grande_pula_o_dia(self):
+        proativo.agendar_tarefa("pesquisar o dólar", "10h")
+        self.andar(hours=6)                                          # PC ligou às 15h
+        self.assertEqual(proativo.tarefas_vencidas(), [])
+        self.andar(days=1, hours=-5)                                 # dia seguinte, 10h
+        self.assertEqual(len(proativo.tarefas_vencidas()), 1)
+
+    def test_cancelar_e_repeticao_invalida(self):
+        proativo.agendar_tarefa("x", "10h")
+        self.assertIn("cancelada", proativo.cancelar_tarefa(1))
+        self.assertIn("Não há tarefa 1", proativo.cancelar_tarefa(1))
+        with self.assertRaises(ValueError):
+            proativo.agendar_tarefa("x", "10h", "de vez em quando")
+
+    def test_vigia_executa_e_avisa_sem_poder_confirmar(self):
+        proativo.agendar_tarefa("pesquisar o dólar", "9:01")
+        self.andar(minutes=1)
+        avisos = []
+        falsa = mock.Mock()
+        falsa.enviar.return_value = mock.Mock(texto="R$ 5,10")
+        with mock.patch("nexo.conversa.Conversa", return_value=falsa) as classe, \
+             mock.patch.object(proativo, "bom_dia", return_value="Bom dia!"), \
+             mock.patch.object(proativo, "refletir"), mock.patch.object(ia, "disponiveis", return_value=[]):
+            v = proativo.Vigia(avisos.append)
+            v.passo()
+            for t in __import__("threading").enumerate():
+                if t.daemon and t.is_alive() and t is not __import__("threading").current_thread():
+                    t.join(timeout=2)
+        self.assertIn("Tarefa agendada, senhor (pesquisar o dólar): R$ 5,10", avisos)
+        self.assertNotIn("confirmar", classe.call_args.kwargs)    # sem confirmar: ações sensíveis negadas

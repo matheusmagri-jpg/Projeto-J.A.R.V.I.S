@@ -319,17 +319,59 @@ def ouvir(limiar: float, espera_maxima: float = 8.0) -> bytes | None:
     return saida.getvalue()
 
 
-def transcrever(audio_wav: bytes) -> str:
+def _transcrever_gemini(audio: bytes, mime: str) -> str:
     from google.genai import types
     from . import ia
 
     pedido = (f"Transcreva exatamente o que foi falado, em português do Brasil. A assistente se chama "
               f"{config.NOME} (escreva sempre {config.NOME} quando for chamada pelo nome). "
               "Responda só com a transcrição; se não houver fala, responda vazio.")
-    r = ia.gerar_gemini([types.Part.from_bytes(data=audio_wav, mime_type="audio/wav"), pedido],
+    r = ia.gerar_gemini([types.Part.from_bytes(data=audio, mime_type=mime), pedido],
                         types.GenerateContentConfig(), modelos=MODELOS_TRANSCRICAO)
     texto = (r.text or "").strip().strip('"')
     return "" if texto.lower() in ("vazio", "(vazio)", "") else texto
+
+
+# Transcrição no próprio PC (faster-whisper): no modo privado nada de áudio vai para a nuvem, e sem internet
+# ou sem cota do Gemini o Jarvis continua ouvindo. O modelo baixa uma vez para modelos/whisper (fora do Git).
+MODELO_WHISPER = os.environ.get("NEXO_WHISPER_MODELO", "small")
+_whisper = None
+_trava_whisper = threading.Lock()
+
+
+def whisper_disponivel() -> bool:
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def transcrever_local(audio: bytes) -> str:
+    global _whisper
+    with _trava_whisper:
+        if _whisper is None:
+            from faster_whisper import WhisperModel
+            _whisper = WhisperModel(MODELO_WHISPER, device="cpu", compute_type="int8",
+                                    download_root=str(config.RAIZ / "modelos" / "whisper"))
+        segmentos, _ = _whisper.transcribe(io.BytesIO(audio), language="pt", beam_size=1, vad_filter=True,
+                                           initial_prompt=f"{config.NOME}, {config.TRATAMENTO}.")
+        return " ".join(s.text.strip() for s in segmentos).strip()
+
+
+def transcrever(audio_wav: bytes, mime: str = "audio/wav") -> str:
+    """Gemini quando pode (mais preciso); Whisper local no modo privado, sem Gemini ou se o Gemini falhar."""
+    from . import ia
+    if ia.privado_ativo() or "gemini" not in ia.disponiveis():
+        if not whisper_disponivel():
+            raise ia.ModoPrivado("Para ouvir sem a nuvem, instale o Whisper local: pip install faster-whisper")
+        return transcrever_local(audio_wav)
+    try:
+        return _transcrever_gemini(audio_wav, mime)
+    except Exception:
+        if not whisper_disponivel():
+            raise
+        return transcrever_local(audio_wav)
 
 
 # ---------- palavra de ativação local (Vosk) ----------

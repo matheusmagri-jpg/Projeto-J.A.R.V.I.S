@@ -1,3 +1,4 @@
+import os
 import unittest
 from types import SimpleNamespace as NS
 from unittest import mock
@@ -9,6 +10,15 @@ from nexo.conversa import Conversa
 from nexo.ferramentas import Ferramenta, computador, internet
 
 from test_cerebro import BaseCerebro
+
+
+def setUpModule():
+    # Estes testes simulam as IAs: as chaves reais da NVIDIA e das contas extras do Gemini ficam de fora.
+    ambiente = mock.patch.dict(os.environ)
+    ambiente.start()
+    unittest.addModuleCleanup(ambiente.stop)
+    for chave in ("NVIDIA_API_KEY", "GEMINI_AGENT_PLATFORM_KEY", "GEMINI_API_KEY_RESERVA"):
+        os.environ.pop(chave, None)
 
 
 def _ferramentas(registro):
@@ -224,6 +234,22 @@ class TestConversaDeepSeek(BaseConversa):
         self.preparar_deepseek([RuntimeError("DeepSeek HTTP 500")])
         t = Conversa(modo="rapido", ferramentas_disponiveis={}).enviar("oi")
         self.assertEqual(t.provedor, "gemini")
+
+    def test_nvidia_entra_na_corrida_quando_o_deepseek_cai(self):
+        gemini = FakeGemini([gemini_diz("Gemini atrasado.")])
+        lento = gemini._gerar
+
+        def gemini_lento(model, contents, config):
+            import time
+            time.sleep(0.5)
+            return lento(model, contents, config)
+        gemini.models.generate_content = gemini_lento
+        self.preparar(gemini=gemini, disponiveis=["gemini", "deepseek", "nvidia"])
+        self.preparar_deepseek([RuntimeError("DeepSeek HTTP 402: Insufficient Balance")])
+        with mock.patch.object(ia, "chamar_nvidia", return_value=deepseek_diz("Aqui é o NVIDIA.")) as nvidia:
+            t = Conversa(modo="rapido", ferramentas_disponiveis={}).enviar("oi")
+        self.assertEqual((t.texto, t.provedor), ("Aqui é o NVIDIA.", "nvidia"))
+        nvidia.assert_called_once()
 
     def test_chave_recusada_sai_da_lista(self):
         self.preparar_deepseek([RuntimeError("DeepSeek HTTP 401: Authentication Fails")])

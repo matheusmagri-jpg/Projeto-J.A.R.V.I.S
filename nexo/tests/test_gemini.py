@@ -17,6 +17,9 @@ def _cliente(comportamentos):
 class TestGeminiHedge(unittest.TestCase):
     def setUp(self):
         ia._esgotados.clear()
+        contas = mock.patch.object(ia, "contas_gemini", return_value=["gemini"])   # as outras contas têm teste próprio
+        contas.start()
+        self.addCleanup(contas.stop)
 
     def test_modelo_lento_nao_trava_o_turno(self):
         def lento():

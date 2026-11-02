@@ -1,14 +1,19 @@
-"""Claude, Gemini e Ollama juntos.
+"""Claude, Gemini, DeepSeek, NVIDIA e Ollama juntos.
 
 Modos:
 - rapido:   Gemini primeiro (barato e veloz); Claude se o Gemini falhar.
 - profundo: Claude primeiro (raciocínio, organizar o cérebro); Gemini se o Claude falhar.
 - dupla:    os dois respondem em paralelo e o Claude junta o melhor de cada um.
 
+O Ollama local é a última reserva (sem internet, sem cota). Para voltar a tentá-lo primeiro,
+NEXO_OLLAMA_PRIMEIRO=1. Com o modo privado ligado (dados/privado.json), só o Ollama responde e
+nenhum texto sai para as IAs da nuvem.
+
 As chaves ficam no .env e nunca entram no texto enviado para as IAs.
 """
 import json
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -17,10 +22,18 @@ from urllib import error, request
 
 from . import config
 
-ORDEM = {
-    "rapido": ["ollama", "gemini", "deepseek", "claude"],
-    "profundo": ["ollama", "claude", "deepseek", "gemini"],
+NUVEM = {
+    "rapido": ["gemini", "deepseek", "nvidia", "claude"],
+    "profundo": ["claude", "gemini", "nvidia", "deepseek"],
 }
+
+
+def montar_ordem(ollama_primeiro: bool) -> dict[str, list[str]]:
+    """Nesta máquina o Ollama leva 37 s (frio) contra 6 s do Gemini e ocupa 2,5 GB de 8 GB de RAM."""
+    return {modo: ["ollama", *ias] if ollama_primeiro else [*ias, "ollama"] for modo, ias in NUVEM.items()}
+
+
+ORDEM = montar_ordem(config.OLLAMA_PRIMEIRO)
 ESFORCO = {"rapido": "low", "profundo": "high", "dupla": "medium"}
 TTL_CACHE_S = 12.0
 MAX_CACHE = 128
@@ -28,6 +41,38 @@ MAX_CACHE = 128
 
 class SemIA(RuntimeError):
     """Nenhuma IA disponível ou todas falharam."""
+
+
+class ModoPrivado(SemIA):
+    """O modo privado está ligado: o pedido iria para uma IA da nuvem e foi barrado."""
+
+
+# ---------- modo privado ----------
+# Fica num arquivo, não na memória: a vigia (bom-dia, resumos) pode rodar em outro processo.
+
+def _arquivo_privado():
+    return config.DADOS / "privado.json"
+
+
+def privado_ativo() -> bool:
+    try:
+        return json.loads(_arquivo_privado().read_text(encoding="utf-8")).get("privado") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def definir_privado(ligado: bool) -> None:
+    arquivo = _arquivo_privado()
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    temporario = arquivo.with_suffix(".tmp")
+    temporario.write_text(json.dumps({"privado": bool(ligado)}), encoding="utf-8")
+    temporario.replace(arquivo)
+
+
+def barrar_nuvem(nome: str) -> None:
+    """Toda chamada a uma IA da nuvem passa por aqui antes de sair do PC."""
+    if privado_ativo():
+        raise ModoPrivado(f"Modo privado ligado: nada foi enviado para {nome}.")
 
 
 @dataclass
@@ -47,16 +92,19 @@ _preaquecido_em = 0.0
 
 def cliente(nome: str):
     """Cliente da IA, criado uma vez só. As chaves vêm do ambiente (.env)."""
+    barrar_nuvem(nome)
     if nome not in _clientes:
         # Limites de tempo: se uma IA travar, o NEXO passa para a outra em vez de esperar.
         if nome == "claude":
             import anthropic
             _clientes[nome] = anthropic.Anthropic(timeout=120.0, max_retries=1)
-        elif nome == "gemini":
+        elif nome in ("gemini", "gemini-reserva", "gemini-agente"):
             from google import genai
             from google.genai import types
-            _clientes[nome] = genai.Client(  # lê GEMINI_API_KEY
-                http_options=types.HttpOptions(timeout=60_000))
+            acesso = {"gemini": {},  # lê GEMINI_API_KEY
+                      "gemini-reserva": {"api_key": os.environ.get("GEMINI_API_KEY_RESERVA")},
+                      "gemini-agente": {"vertexai": True, "api_key": os.environ.get("GEMINI_AGENT_PLATFORM_KEY")}}[nome]
+            _clientes[nome] = genai.Client(http_options=types.HttpOptions(timeout=60_000), **acesso)
         else:
             raise ValueError(f"cliente desconhecido: {nome}")
     return _clientes[nome]
@@ -90,26 +138,44 @@ def _claude(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -
 # que responder; modelo sem cota (429) é pulado por ESGOTADO_S.
 HEDGE_S = float(os.environ.get("NEXO_GEMINI_HEDGE", "4"))
 ESGOTADO_S = 300.0
-_esgotados: dict[str, float] = {}
+HEDGE_PROFUNDO_S = 45.0   # o modelo forte pensa mais: disputar cedo daria o turno sempre ao mais fraco
+_esgotados: dict[tuple[str, str], float] = {}
 
 
-def gerar_gemini(contents, ajustes, modelos: list[str] | None = None):
+def contas_gemini() -> list[str]:
+    """Contas do Gemini com chave, na ordem de uso. Cada conta tem a própria cota."""
+    contas = ["gemini"] if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") else []
+    if os.environ.get("GEMINI_AGENT_PLATFORM_KEY"):
+        contas.append("gemini-agente")
+    if os.environ.get("GEMINI_API_KEY_RESERVA"):
+        contas.append("gemini-reserva")
+    return contas
+
+
+def modelos_gemini(modo: str) -> list[str]:
+    if modo != "profundo":
+        return list(config.GEMINI_MODELOS)
+    return [config.GEMINI_MODELO_PROFUNDO] + [m for m in config.GEMINI_MODELOS if m != config.GEMINI_MODELO_PROFUNDO]
+
+
+def gerar_gemini(contents, ajustes, modelos: list[str] | None = None, hedge: float | None = None):
     """Chama o Gemini; se um modelo bater no limite de uso (429), estiver sobrecarregado ou fora do
-    ar (5xx), ou demorar mais que HEDGE_S, o próximo da lista entra na disputa.
+    ar (5xx), ou demorar mais que HEDGE_S, a próxima opção entra na disputa.
 
-    No plano gratuito cada modelo tem a própria cota por minuto, então trocar de modelo
-    costuma resolver na hora.
+    Cada conta tem a própria cota por modelo: o mesmo modelo é tentado em todas as contas antes de
+    cair para um modelo mais fraco.
     """
     from concurrent.futures import FIRST_COMPLETED, wait
     from google.genai import errors
 
     lista = list(modelos or config.GEMINI_MODELOS)
     agora = monotonic()
-    ativos = [m for m in lista if _esgotados.get(m, 0) <= agora] or lista
-    cliente_gemini = cliente("gemini")
+    opcoes = [(conta, m) for m in lista for conta in contas_gemini() or ["gemini"]]
+    ativos = [o for o in opcoes if _esgotados.get(o, 0) <= agora] or opcoes
+    espera = HEDGE_S if hedge is None else hedge
 
-    def chamar(modelo):
-        return cliente_gemini.models.generate_content(model=modelo, contents=contents, config=ajustes)
+    def chamar(opcao):
+        return cliente(opcao[0]).models.generate_content(model=opcao[1], contents=contents, config=ajustes)
 
     pool = ThreadPoolExecutor(len(ativos), thread_name_prefix="nexo-gemini")
     pendentes: dict = {}
@@ -119,22 +185,23 @@ def gerar_gemini(contents, ajustes, modelos: list[str] | None = None):
             if proximo < len(ativos) and not pendentes:
                 pendentes[pool.submit(chamar, ativos[proximo])] = ativos[proximo]
                 proximo += 1
-            feitos, _ = wait(pendentes, timeout=HEDGE_S if proximo < len(ativos) else None,
+            feitos, _ = wait(pendentes, timeout=espera if proximo < len(ativos) else None,
                              return_when=FIRST_COMPLETED)
             if not feitos:   # demorou: dispara o próximo sem desistir do que já está rodando
                 pendentes[pool.submit(chamar, ativos[proximo])] = ativos[proximo]
                 proximo += 1
                 continue
             for futuro in feitos:
-                modelo = pendentes.pop(futuro)
+                opcao = pendentes.pop(futuro)
                 try:
                     return futuro.result()
                 except errors.ServerError as e:
                     ultimo = e
                 except errors.ClientError as e:
-                    if e.code != 429:
+                    # 403: a chave não vale para este serviço; 404: o modelo não existe nele. Outra conta pode atender.
+                    if e.code != 429 and not (e.code in (403, 404) and len(opcoes) > len(lista)):
                         raise
-                    _esgotados[modelo] = monotonic() + ESGOTADO_S
+                    _esgotados[opcao] = monotonic() + ESGOTADO_S
                     ultimo = e
             if not pendentes and proximo >= len(ativos):
                 raise ultimo
@@ -149,18 +216,16 @@ def _gemini(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -
     if esquema:
         ajustes.response_mime_type = "application/json"
         ajustes.response_json_schema = esquema
-    resposta = gerar_gemini(prompt, ajustes)
+    resposta = gerar_gemini(prompt, ajustes, modelos_gemini(modo), HEDGE_PROFUNDO_S if modo == "profundo" else None)
     return (resposta.text or "").strip()
 
 
-def chamar_deepseek(corpo: dict, timeout: float = 60.0) -> dict:
+def _chamar_compativel(nome: str, base_url: str, api_key: str, corpo: dict, timeout: float) -> dict:
     """POST em /chat/completions (formato da OpenAI) e devolve o JSON da resposta."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY ausente")
+    barrar_nuvem(nome)
     req = request.Request(
-        f"{config.DEEPSEEK_BASE_URL}/chat/completions",
-        data=json.dumps({"model": config.DEEPSEEK_MODELO, "stream": False, **corpo}, ensure_ascii=False).encode("utf-8"),
+        f"{base_url}/chat/completions",
+        data=json.dumps({"stream": False, **corpo}, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
         method="POST",
     )
@@ -169,23 +234,43 @@ def chamar_deepseek(corpo: dict, timeout: float = 60.0) -> dict:
             bruto = r.read().decode("utf-8")
     except error.HTTPError as e:
         detalhe = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"DeepSeek HTTP {e.code}: {detalhe[:500]}") from e
+        raise RuntimeError(f"{nome} HTTP {e.code}: {detalhe[:500]}") from e
     except error.URLError as e:
-        raise RuntimeError(f"Não consegui conectar ao DeepSeek em {config.DEEPSEEK_BASE_URL}: {e.reason}") from e
+        raise RuntimeError(f"Não consegui conectar ao {nome} em {base_url}: {e.reason}") from e
     try:
         return json.loads(bruto)
     except json.JSONDecodeError as e:
-        raise RuntimeError("DeepSeek devolveu JSON inválido.") from e
+        raise RuntimeError(f"{nome} devolveu JSON inválido.") from e
 
 
-def _deepseek(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -> str:
+def chamar_deepseek(corpo: dict, timeout: float = 60.0) -> dict:
+    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY")
+    if not api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY ausente")
+    return _chamar_compativel("DeepSeek", config.DEEPSEEK_BASE_URL, api_key,
+                              {"model": config.DEEPSEEK_MODELO, **corpo}, timeout)
+
+
+def chamar_nvidia(corpo: dict, modo: str = "rapido", timeout: float = 60.0) -> dict:
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY ausente")
+    modelo = config.NVIDIA_MODELOS.get(modo, config.NVIDIA_MODELOS["rapido"])
+    return _chamar_compativel("NVIDIA", config.NVIDIA_BASE_URL, api_key, {"model": modelo, **corpo}, timeout)
+
+
+def sem_raciocinio(texto: str) -> str:
+    """Alguns modelos abertos escrevem o raciocínio em <think> dentro da resposta."""
+    return re.sub(r"<think>.*?</think>", "", texto, flags=re.S).strip()
+
+
+def _texto_compativel(prompt: str, sistema: str | None, esquema: dict | None, chamar, nome: str) -> str:
     if esquema:
-        json_prompt = (
+        prompt = (
             "Responda somente em JSON válido, sem markdown nem texto extra, "
             f"seguindo exatamente este schema: {json.dumps(esquema, ensure_ascii=False)}\n\n"
             f"Pergunta:\n{prompt}"
         )
-        prompt = json_prompt
 
     corpo = {
         "messages": [
@@ -195,14 +280,14 @@ def _deepseek(prompt: str, sistema: str | None, esquema: dict | None, modo: str)
     }
     if esquema:
         corpo["response_format"] = {"type": "json_object"}
-    payload = chamar_deepseek(corpo)
+    payload = chamar(corpo)
 
     texto = ""
     for escolha in payload.get("choices", []):
         msg = escolha.get("message") or {}
         conteudo = msg.get("content")
         if isinstance(conteudo, str) and conteudo.strip():
-            texto = conteudo.strip()
+            texto = sem_raciocinio(conteudo)
             break
         if isinstance(conteudo, list):
             partes = []
@@ -212,11 +297,19 @@ def _deepseek(prompt: str, sistema: str | None, esquema: dict | None, modo: str)
                     if isinstance(text, str):
                         partes.append(text)
             if partes:
-                texto = "".join(partes).strip()
+                texto = sem_raciocinio("".join(partes))
                 break
     if not texto:
-        raise RuntimeError("DeepSeek devolveu resposta vazia.")
+        raise RuntimeError(f"{nome} devolveu resposta vazia.")
     return texto
+
+
+def _deepseek(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -> str:
+    return _texto_compativel(prompt, sistema, esquema, chamar_deepseek, "DeepSeek")
+
+
+def _nvidia(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -> str:
+    return _texto_compativel(prompt, sistema, esquema, lambda corpo: chamar_nvidia(corpo, modo), "NVIDIA")
 
 
 def _ollama(prompt: str, sistema: str | None, esquema: dict | None, modo: str) -> str:
@@ -267,22 +360,26 @@ PROVEDORES = {
     "claude": (_claude, config.tem_claude),
     "gemini": (_gemini, config.tem_gemini),
     "deepseek": (_deepseek, config.tem_deepseek),
+    "nvidia": (_nvidia, config.tem_nvidia),
     "ollama": (_ollama, config.tem_ollama),
 }
 
 
-# IAs cuja chave foi recusada (401/403) nesta execução: tentar de novo a cada pergunta só atrasa.
+# IAs com chave recusada (401/403) ou sem saldo nesta execução: tentar de novo a cada pergunta só atrasa.
 _recusadas: dict[str, str] = {}
 
 
 def disponiveis() -> list[str]:
-    return [nome for nome, (_, tem) in PROVEDORES.items() if tem() and nome not in _recusadas]
+    privado = privado_ativo()
+    return [nome for nome, (_, tem) in PROVEDORES.items()
+            if tem() and nome not in _recusadas and (nome == "ollama" or not privado)]
 
 
 def chave_recusada(nome: str, erro: Exception) -> bool:
-    """Se o erro é de chave inválida, tira a IA da lista até o Jarvis ser reiniciado."""
+    """Se o erro é de chave inválida ou falta de saldo, tira a IA da lista até o Jarvis ser reiniciado."""
     texto = str(erro)
-    if any(s in texto for s in ("HTTP 401", "HTTP 403", "authentication_error", "invalid x-api-key", "API_KEY_INVALID")):
+    if any(s in texto for s in ("HTTP 401", "HTTP 402", "HTTP 403", "authentication_error", "invalid x-api-key",
+                                "API_KEY_INVALID", "credit balance")):
         _recusadas[nome] = texto[:200]
         return True
     return False
@@ -337,10 +434,14 @@ def _ping_ollama() -> None:
 def _preaquecer_worker() -> None:
     global _preaquecendo, _preaquecido_em
     try:
-        if config.tem_claude():
-            cliente("claude")
+        if privado_ativo():
+            return
+        # Só a primeira IA do modo rápido: importar o SDK do Claude junto leva dezenas de segundos com a
+        # máquina cheia e atrasa o do Gemini. O Claude carrega quando for chamado de verdade.
         if config.tem_gemini():
             cliente("gemini")
+        elif config.tem_claude():
+            cliente("claude")
         if config.tem_ollama():
             try:
                 _ping_ollama()
@@ -368,6 +469,9 @@ def preaquecer_async(forcar: bool = False) -> bool:
 # ---------- roteamento ----------
 
 def _uma(prompt, sistema, esquema, modo, ordem) -> Resposta:
+    privado = privado_ativo()
+    if privado:
+        ordem = ["ollama"]
     chave_cache = None
     if esquema is None and modo in ORDEM:
         chave_cache = _chave_cache(prompt, sistema, modo, ordem)
@@ -382,7 +486,7 @@ def _uma(prompt, sistema, esquema, modo, ordem) -> Resposta:
         if not entrada:
             continue
         chamar, tem = entrada
-        if tem():
+        if tem() and nome not in _recusadas:
             ativos.append((nome, chamar))
 
     for nome, chamar in ativos:
@@ -395,11 +499,15 @@ def _uma(prompt, sistema, esquema, modo, ordem) -> Resposta:
                 _cache_set(chave_cache, resposta)
             return resposta
         except Exception as e:  # tenta a próxima IA
+            chave_recusada(nome, e)
             erros.append(f"{nome}: {type(e).__name__}: {e}")
+    if privado:
+        motivo = "\n".join(erros) or "o Ollama está desligado (NEXO_OLLAMA_ATIVO)."
+        raise ModoPrivado(f"Modo privado ligado: o Ollama local não respondeu e nada foi enviado à nuvem.\n{motivo}")
     if not erros:
         raise SemIA(
             "Nenhuma IA disponível. Configure GEMINI_API_KEY, ANTHROPIC_API_KEY, "
-            "DEEPSEEK_API_KEY ou ative o Ollama local (NEXO_OLLAMA_ATIVO=1)."
+            "DEEPSEEK_API_KEY, NVIDIA_API_KEY ou ative o Ollama local (NEXO_OLLAMA_ATIVO=1)."
         )
     raise SemIA("Todas as IAs falharam:\n" + "\n".join(erros))
 
