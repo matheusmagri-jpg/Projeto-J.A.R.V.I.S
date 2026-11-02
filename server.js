@@ -8,7 +8,7 @@
   curl.exe -X POST http://127.0.0.1:3000/api/ia -H "Content-Type: application/json" -d "{\"message\":\"Olá\"}"
 
   O servidor escuta apenas em 127.0.0.1, para não expor a API na rede.
-  Requer Node.js 18 ou superior; não precisa instalar Express nem outros pacotes.
+  Requer Node.js 20.12 ou superior (process.loadEnvFile); não precisa instalar Express nem outros pacotes.
 */
 
 const http = require("node:http");
@@ -113,7 +113,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, await response.json());
     } catch {
       return sendJson(res, 503, {
-        error: "Não foi possível conectar ao Ollama em 127.0.0.1:11434."
+        error: `Não foi possível conectar ao Ollama em ${ollamaUrl}.`
       });
     }
   }

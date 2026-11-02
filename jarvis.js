@@ -50,507 +50,66 @@ let systemEnabled = true;
 let claudeTimer = null;
 let tickTimer = null;
 
-// ---------- OTIMIZAÇÕES ----------
-// Cache inteligente para API calls e dados
-const APICache = {
-  cache: new Map(),
-  defaultTTL: 5 * 60 * 1000, // 5 minutos
-  
-  get(key, customTTL) {
-    const item = this.cache.get(key);
-    if (item && Date.now() - item.timestamp < (customTTL || this.defaultTTL)) {
-      // Atualizar timestamp para manter ordem LRU
-      this.cache.delete(key);
-      this.cache.set(key, item);
-      return item.data;
-    }
-    this.cache.delete(key);
-    return null;
-  },
-  
-  set(key, data, ttl) {
-    // Implementar LRU simples - remover item mais antigo se cheio
-    if (this.cache.size >= 100) {
-      const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
-    }
-    
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now()
-    });
-  },
-  
-  // Cache específico para diferentes tipos de dados
-  revenue: new Map(),
-  subscribers: new Map(),
-  ads: new Map(),
-  roas: new Map()
-};
-
-// Cache para respostas da IA
-const AICache = {
-  memory: new Map(),
-  maxSize: 50,
-  contextTimeout: 30 * 60 * 1000, // 30 minutos
-  
-  get(key, context) {
-    const cacheKey = context ? `${key}:${JSON.stringify(context)}` : key;
-    const item = this.memory.get(cacheKey);
-    
-    if (item && !this.isExpired(item)) {
-      // Mover para o final (LRU)
-      this.memory.delete(cacheKey);
-      this.memory.set(cacheKey, item);
-      PerformanceMonitor.incrementCacheHit();
-      return item.response;
-    }
-    
-    PerformanceMonitor.incrementCacheMiss();
-    return null;
-  },
-  
-  set(key, response, context) {
-    const cacheKey = context ? `${key}:${JSON.stringify(context)}` : key;
-    
-    if (this.memory.size >= this.maxSize) {
-      const firstKey = this.memory.keys().next().value;
-      this.memory.delete(firstKey);
-    }
-    
-    this.memory.set(cacheKey, {
-      response,
-      timestamp: Date.now(),
-      context
-    });
-  },
-  
-  isExpired(item) {
-    return Date.now() - item.timestamp > this.contextTimeout;
-  },
-  
-  // Cache baseado em similaridade de mensagens
-  getSimilarResponse: function(message, context) {
-    const messageKey = message.substring(0, 50).toLowerCase();
-    const contextKey = context ? JSON.stringify(context) : '';
-    
-    // Tentar match exato primeiro
-    const exactKey = `exact:${messageKey}:${contextKey}`;
-    if (this.memory.has(exactKey)) {
-      PerformanceMonitor.incrementCacheHit();
-      return this.memory.get(exactKey).response;
-    }
-    
-    // Tentar match parcial
-    for (const [key, item] of this.memory) {
-      if (key.includes(messageKey) && 
-          (!contextKey || key.includes(contextKey))) {
-        PerformanceMonitor.incrementCacheHit();
-        return item.response;
-      }
-    }
-    
-    PerformanceMonitor.incrementCacheMiss();
-  
-  init() {
-    this.startMetricsCollection();
-    this.createFloatingMetrics();
-    this.createDebugPanel();
-  },
-  
-  startMetricsCollection() {
-    // Coletar métricas a cada 5 segundos
-    setInterval(() => {
-      this.updateMetrics();
-      this.sendMetricsToServer();
-    }, 5000);
-  },
-  
-  createFloatingMetrics() {
-    // Criar indicador flutuante de métricas
-    const floating = document.createElement('div');
-    floating.id = 'floating-metrics';
-    floating.className = 'floating-metrics';
-    floating.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      z-index: 1000;
-      font-size: 12px;
-      max-height: 200px;
-      overflow-y: auto;
-      cursor: pointer;
-      transition: opacity 0.3s;
-      opacity: 0.8;
-    `;
-    
-    floating.innerHTML = `
-      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-        <strong style="color: var(--cyan);">JARVIS Metrics</strong>
-        <span style="color: var(--muted); font-size: 10px;">Ctrl+M</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Cache:</span>
-        <span class="metric-value" id="floating-cache-rate">0%</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">API:</span>
-        <span class="metric-value" id="floating-api-calls">0</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Render:</span>
-        <span class="metric-value" id="floating-render-time">0ms</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Memory:</span>
-        <span class="metric-value" id="floating-memory">0MB</span>
-      </div>
-    `;
-    
-    // Adicionar evento de clique para mostrar/ocultar
-    floating.addEventListener('click', (e) => {
-      if (e.target === floating || e.target.closest('.metric-item')) {
-        this.toggleDebugPanel();
-      }
-    });
-    
-    document.body.appendChild(floating);
-    
-    // Adicionar atalho de teclado
-    document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.key === 'm') {
-        e.preventDefault();
-        this.toggleDebugPanel();
-      }
-    });
-  },
-  
-  createDebugPanel() {
-    // Criar painel de debug (inicialmente oculto)
-    const debugPanel = document.createElement('div');
-    debugPanel.id = 'debug-panel';
-    debugPanel.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: var(--bg);
-      border: 2px solid var(--cyan);
-      border-radius: 8px;
-      padding: 20px;
-      z-index: 2000;
-      max-width: 80%;
-      max-height: 80%;
-      overflow: auto;
-      font-family: monospace;
-      font-size: 12px;
-      display: none;
-    `;
-    
-    debugPanel.innerHTML = `
-      <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-        <h3 style="color: var(--cyan); margin-top: 0;">JARVIS Debug</h3>
-        <button onclick="document.getElementById('debug-panel').style.display = 'none'" 
-                style="background: var(--cyan); color: var(--bg); border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
-          Fechar
-        </button>
-      </div>
-      <div id="debug-content">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-          <div>
-            <strong>Cache:</strong><br>
-            Hits: <span id="debug-cache-hits">0</span><br>
-            Misses: <span id="debug-cache-misses">0</span><br>
-            Taxa: <span id="debug-cache-rate">0%</span>
-          </div>
-          <div>
-            <strong>API:</strong><br>
-            Chamadas: <span id="debug-api-calls">0</span><br>
-            Erros: <span id="debug-api-errors">0</span>
-          </div>
-          <div>
-            <strong>Performance:</strong><br>
-            Render: <span id="debug-render-time">0ms</span><br>
-            FPS: <span id="debug-fps">60</span>
-          </div>
-          <div>
-            <strong>Memória:</strong><br>
-            Uso: <span id="debug-memory">0MB</span><br>
-            Elementos DOM: <span id="debug-dom-elements">0</span>
-          </div>
-        </div>
-        <div style="margin-top: 10px;">
-          <strong>Eventos Recentes:</strong><br>
-          <div id="debug-events" style="max-height: 100px; overflow: auto; border: 1px solid var(--line); padding: 5px; font-size: 11px;"></div>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(debugPanel);
-  },
-  
-  toggleDebugPanel() {
-    const panel = document.getElementById('debug-panel');
-    if (panel.style.display === 'none') {
-      panel.style.display = 'block';
-      this.updateDebugPanel();
-    } else {
-      panel.style.display = 'none';
-    }
-  },
-  
-  updateMetrics() {
-    const cacheTotal = this.metrics.cacheHits + this.metrics.cacheMisses;
-    const cacheRate = cacheTotal > 0 ? (this.metrics.cacheHits / cacheTotal) * 100 : 0;
-    
-    this.metrics.cacheRate = cacheRate;
-    
-    // Atualizar métricas flutuantes
-    const cacheRateElement = document.getElementById('floating-cache-rate');
-    if (cacheRateElement) cacheRateElement.textContent = `${cacheRate.toFixed(0)}%`;
-    
-    const apiCallsElement = document.getElementById('floating-api-calls');
-    if (apiCallsElement) apiCallsElement.textContent = this.metrics.apiCalls;
-    
-    const renderTimeElement = document.getElementById('floating-render-time');
-    if (renderTimeElement) renderTimeElement.textContent = `${this.metrics.renderTime}ms`;
-  },
-  
-  updateDebugPanel() {
-    const cacheRate = this.metrics.cacheHits / Math.max(1, this.metrics.cacheHits + this.metrics.cacheMisses) * 100;
-    
-    document.getElementById('debug-cache-hits').textContent = this.metrics.cacheHits;
-    document.getElementById('debug-cache-misses').textContent = this.metrics.cacheMisses;
-    document.getElementById('debug-cache-rate').textContent = `${cacheRate.toFixed(0)}%`;
-    document.getElementById('debug-api-calls').textContent = this.metrics.apiCalls;
-    document.getElementById('debug-api-errors').textContent = this.metrics.apiErrors || 0;
-    document.getElementById('debug-render-time').textContent = `${this.metrics.renderTime}ms`;
-    document.getElementById('debug-fps').textContent = this.metrics.fps || 60;
-    document.getElementById('debug-memory').textContent = `${this.metrics.memoryUsage}MB`;
-    document.getElementById('debug-dom-elements').textContent = document.querySelectorAll('*').length;
-  },
-  
-  logEvent(message) {
-    const events = document.getElementById('debug-events');
-    if (events) {
-      const div = document.createElement('div');
-      div.style.borderBottom = '1px solid var(--line)';
-      div.style.padding = '2px';
-      div.style.marginBottom = '2px';
-      div.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
-      events.appendChild(div);
-      events.scrollTop = events.scrollHeight;
-    }
-  },
-  
-  // Métodos auxiliares
-  incrementCacheHit() { this.metrics.cacheHits++; },
-  incrementCacheMiss() { this.metrics.cacheMisses++; },
-  incrementApiCall(success = true) { 
-    this.metrics.apiCalls++;
-    if (!success) this.metrics.apiErrors++;
-  },
-  setRenderTime(time) { this.metrics.renderTime = time; },
-  setFPS(fps) { this.metrics.fps = fps; },
-  setMemoryUsage(usage) { this.metrics.memoryUsage = usage; }
-};
-
-// Otimizações de performance para renderização
-const PerformanceOptimizer = {
-  // Debounce para eventos de resize
-  debounceResize: function(callback, delay = 250) {
-    let timeoutId;
-    return function() {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        callback();
-        // Forçar recalculo apenas quando necessário
-        requestAnimationFrame(() => {
-          document.querySelectorAll('.wide').forEach(el => {
-            el.style.display = 'none';
-            setTimeout(() => el.style.display = '', 10);
-          });
-        });
-      }, delay);
-    };
-  },
-  
-  // Throttle para scroll
-  throttleScroll: function(callback, delay = 100) {
-    let lastExecuted = 0;
-    return function() {
-      const now = Date.now();
-      if (now - lastExecuted >= delay) {
-        callback();
-        lastExecuted = now;
-      }
-    };
-  },
-  
-  // Observer para elementos dinâmicos
-  setupMutationObserver: function() {
-    const observer = new MutationObserver((mutations) => {
-      let shouldUpdate = false;
-      
-      mutations.forEach(mutation => {
-        if (mutation.addedNodes.length) {
-          mutation.addedNodes.forEach(node => {
-            if (node.nodeType === 1 && node.classList) {
-              // Otimizar novos elementos adicionados
-              if (node.classList.contains('card')) {
-                this.optimizeCardElement(node);
-              }
-              if (node.classList.contains('wide')) {
-                shouldUpdate = true;
-              }
-            }
-          });
-        }
-      });
-      
-      if (shouldUpdate) {
-        // Recalcular layouts apenas quando necessário
-        this.debounceResize(() => {
-          this.updateLayouts();
-        }, 100)();
-      }
-    });
-    
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  },
-  
-  optimizeCardElement: function(card) {
-    // Otimizações de performance para cards
-    card.style.contain = 'layout style paint';
-    card.style.willChange = 'auto';
-    card.setAttribute('data-optimized', 'true');
-  },
-  
-  updateLayouts: function() {
-    // Recalcular grid apenas quando necessário
-    const main = document.querySelector('main');
-    if (main) {
-      main.style.display = 'none';
-      requestAnimationFrame(() => {
-        main.style.display = '';
-      });
-    }
-  },
-  
-  // Cache de elementos DOM frequentemente acessados
-  domCache: new Map(),
-  
-  getElement: function(selector) {
-    const cacheKey = `el:${selector}`;
-    if (!this.domCache.has(cacheKey)) {
-      const element = document.querySelector(selector);
-      this.domCache.set(cacheKey, element);
-    }
-    return this.domCache.get(cacheKey);
+function setPowerState(enabled, options = {}) {
+  const { persist = true, announce = false } = options;
+  systemEnabled = Boolean(enabled);
+  const powerButton = document.getElementById("powerToggle");
+  const speakButton = document.getElementById("speak");
+  const cfgButton = document.getElementById("cfg");
+  const testVoiceButton = document.getElementById("testarVoz");
+  const iaInput = document.getElementById("ia-input");
+  const iaSend = document.getElementById("ia-send");
+  if (powerButton) {
+    powerButton.textContent = systemEnabled ? "🟢 Sistema ligado" : "🔴 Sistema desligado";
+    powerButton.classList.toggle("is-off", !systemEnabled);
+    powerButton.setAttribute("aria-pressed", String(systemEnabled));
   }
-};
-
-// Melhorar cache de voz
-const VoiceCache = {
-  cache: new Map(),
-  maxSize: 20,
-  audioCache: new Map(), // Cache separado para URLs de áudio
-  
-  get(key) {
-    const item = this.cache.get(key);
-    if (item && Date.now() - item.timestamp < item.ttl) {
-      return item.audioUrl;
-    }
-    return null;
-  },
-  
-  set(key, audioUrl, ttl = 3600000) { // 1 hora default
-    if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
-    }
-    
-    this.cache.set(key, {
-      audioUrl,
-      timestamp: Date.now(),
-      ttl
-    });
-  },
-  
-  // Cache específico para diferentes engines
-  browser: new Map(),
-  elevenlabs: new Map(),
-  fish: new Map(),
-  
-  // Otimizações de performance para voz
-  getOptimizedAudio: function(text, engine, options = {}) {
-    const cacheKey = `audio:${engine}:${text.substring(0, 100)}`;
-    const cached = this.audioCache.get(cacheKey);
-    
-    if (cached && !this.isExpired(cached)) {
-      return cached.url;
-    }
-    
-    // Gerar novo áudio
-    const audioUrl = this.generateAudioUrl(text, engine, options);
-    
-    if (this.audioCache.size >= 50) {
-      const firstKey = this.audioCache.keys().next().value;
-      this.audioCache.delete(firstKey);
-    }
-    
-    this.audioCache.set(cacheKey, {
-      url: audioUrl,
-      timestamp: Date.now(),
-      ttl: 3600000
-    });
-    
-    return audioUrl;
-  },
-  
-  isExpired(item) {
-    return Date.now() - item.timestamp > item.ttl;
-  },
-  
-  generateAudioUrl: function(text, engine, options) {
-    // Implementação simplificada - na prática seria uma chamada real para API
-    const timestamp = Date.now();
-    const hash = btoa(text).substring(0, 16);
-    return `/api/audio?engine=${engine}&text=${encodeURIComponent(text)}&t=${timestamp}&hash=${hash}`;
+  if (speakButton) speakButton.disabled = !systemEnabled;
+  if (cfgButton) cfgButton.disabled = !systemEnabled;
+  if (testVoiceButton) testVoiceButton.disabled = !systemEnabled;
+  if (iaInput) iaInput.disabled = !systemEnabled;
+  if (iaSend) iaSend.disabled = !systemEnabled;
+  document.body.classList.toggle("system-off", !systemEnabled);
+  if (persist) store.set("jarvisPowerState", String(systemEnabled));
+  mostrarBriefing();
+  if (!systemEnabled) {
+    clearInterval(claudeTimer);
+    claudeTimer = null;
+    clearInterval(tickTimer);
+    tickTimer = null;
+    speechSynthesis.cancel();
+    if (announce) console.info("JARVIS desligado");
+    return;
   }
-        }, 100);
-        return;
-      }
-      
-      // Fazer chamada real para IA
-      PerformanceMonitor.incrementApiCall();
-      fetch('/api/ia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, context })
-      })
-      .then(response => {
-        PerformanceMonitor.incrementApiCall(response.ok);
-        return response.json();
-      })
-      .then(data => {
-        AICache.set(`msg:${message}`, data.response, context);
-        
-        const log = document.getElementById('ia-log');
-        const li = document.createElement('li');
-        li.innerHTML = `<span>🤖 ${data.response}</span>`;
-        log.appendChild(li);
-        log.scrollTop = log.scrollHeight;
-      })
-      .catch(error => {
-        PerformanceMonitor.incrementApiCall(false);
+  if (announce) console.info("JARVIS ligado");
+  if (!claudeTimer) claudeTimer = setInterval(carregarClaude, 15000);
+  if (!tickTimer) tickTimer = setInterval(tick, 30000);
+  tick();
+  if (typeof carregarClaude === "function") carregarClaude();
+}
+
+async function syncPowerState(enabled) {
+  setPowerState(enabled, { persist: true, announce: false });
+  try {
+    const res = await fetch("http://127.0.0.1:3000/api/system", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) throw new Error("server");
+    const data = await res.json();
+    setPowerState(Boolean(data.enabled), { persist: true, announce: false });
+  } catch {
+    // Fallback local quando o backend não está disponível.
+  }
+}
+
+async function carregarEstadoSistema() {
+  try {
+    const res = await fetch("http://127.0.0.1:3000/api/system", { cache: "no-store" });
+    if (!res.ok) throw new Error("server");
+    const data = await res.json();
+    setPowerState(Boolean(data.enabled), { persist: false, announce: false });
     return;
   } catch {
     const saved = store.get("jarvisPowerState");
@@ -566,8 +125,9 @@ function saudacao() {
 
 function textoBriefing(d) {
   if (d.briefing) return d.briefing;
-  const pend = d.emails.filter(e => e[2] === "bad").length;
-  const resp = d.emails.length - pend;
+  const emails = d.emails || [], prioridades = d.prioridades || [];
+  const pend = emails.filter(e => e[2] === "bad").length;
+  const resp = emails.length - pend;
   return `${saudacao()} Seu resumo está pronto.
 
 A receita do período foi de ${brl(d.receita)}, ${d.receitaVar >= 0 ? "uma alta" : "uma queda"} de ${Math.abs(d.receitaVar).toLocaleString("pt-BR")} por cento. Temos ${d.assinantes.toLocaleString("pt-BR")} assinantes ativos.
@@ -576,9 +136,15 @@ Em anúncios, foram investidos ${brl(d.ads)}, com ROAS de ${d.roas.toLocaleStrin
 
 Respondi ${resp} e-mails de suporte. ${pend ? `${pend} ${pend > 1 ? "casos exigem" : "caso exige"} sua atenção.` : "Nenhum caso pendente."}
 
-${d.prioridades.length ? `Prioridade número um: ${d.prioridades[0][0]}.` : ""}
+${prioridades.length ? `Prioridade número um: ${prioridades[0][0]}.` : ""}
 
 Isso é tudo por enquanto, senhor. Estarei à disposição.`;
+}
+
+// Desligado, o card do briefing explica o modo de segurança; religado, volta o texto do dia.
+function mostrarBriefing() {
+  const el = document.getElementById("briefing");
+  if (el) el.textContent = systemEnabled ? textoBriefing(data) : "Sistema desligado pelo interruptor mestre. O JARVIS está em modo de segurança e não executa rotinas, monitoramento nem voz até que seja religado.";
 }
 
 function desenharGrafico(v) {
@@ -624,7 +190,7 @@ function render() {
   }
   document.getElementById("prio").innerHTML = d.prioridades.map(([t, s]) => `<li><span class="tag t-${s}">${{bad: "urgente", warn: "atenção", ok: "rotina"}[s]}</span>${t}</li>`).join("");
   document.getElementById("mail").innerHTML = d.emails.map(([t, st, s]) => `<li><span class="tag t-${s}">${st}</span>${t}</li>`).join("") || '<li class="sub">Nenhum e-mail de cliente pendente.</li>';
-  document.getElementById("briefing").textContent = textoBriefing(d);
+  mostrarBriefing();
   set("demo", d.demo ? "· dados de exemplo" : "");
   const g = document.getElementById("chart").closest(".card");
   g.hidden = !d.receitaDiaria;
