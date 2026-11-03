@@ -7,6 +7,11 @@
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
+<div id="intro" class="intro">
+  <video id="intro-video" src="media/intro.mp4" playsinline preload="auto"></video>
+  <button id="intro-som" class="intro-som" hidden>Ativar som</button>
+  <button id="intro-pular" class="intro-pular">Pular intro</button>
+</div>
 <header>
   <div class="core" id="core"></div>
   <div>
@@ -89,6 +94,7 @@
 <script>
 window.onerror = (m, src, l) => { const b = document.createElement("div"); b.className = "runtime-error"; b.textContent = "Erro no JARVIS: " + m + " (linha " + l + ")"; document.body.prepend(b); };
 </script>
+<script src="intro.js"></script>
 <script src="jarvis.js"></script>
 </body>
 </html>

@@ -64,3 +64,6 @@ output/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Vídeo da intro do painel (grande demais para o Git)
+media/

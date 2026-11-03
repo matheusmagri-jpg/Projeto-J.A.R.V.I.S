@@ -8,6 +8,7 @@ Pasta com dois projetos do mesmo assistente, servida pelo XAMPP em `http://local
 
 ## Arquivos da raiz
 - `dashboard.html` + `jarvis.js`: painel. Lê `data.json`, `claude-code.php` (sessões do Claude Code, só responde para 127.0.0.1) e `/CBTECH/admin/jarvis-dados.php` (dados ao vivo do site CBTECH, mesmo XAMPP).
+- `intro.js` + `media/intro.mp4`: intro em vídeo que cobre o painel sempre que ele abre e some no fim (botão "Pular intro", Esc ou Enter). `media/` fica fora do Git (o vídeo passa de 100 MB).
 - `gerar_briefing.py`: gera `data.json`, `briefing.txt` e `jarvis.mp3` (RevenueCat, Meta Ads). Os três arquivos ficam fora do Git.
 - `jarvis_voz.py`: fala um texto com ElevenLabs ou Fish Audio.
 - `regravar-falas.mjs`: regrava com ElevenLabs as falas do J.A.R.V.I.S. do Claude Code (`~/.claude/jarvis/`). Cada execução custa créditos; sem `--gravar` só mostra o custo.
