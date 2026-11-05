@@ -29,5 +29,17 @@ Pasta com dois projetos do mesmo assistente, servida pelo XAMPP em `http://local
 - O Apache escuta em 0.0.0.0:8080, então tudo o que ele serve fica visível na rede. O `.htaccess` devolve 404 para arquivos que começam com ponto, para qualquer pasta `nexo/` (em qualquer nível), para `habblaud/`, para as pastas de backup e para `.py .mjs .cmd .md .txt .log .ipynb .zip`. Arquivo novo que não deve ir para a rede precisa de uma regra lá.
 - `jarvis_voz.py`, `gerar_briefing.py` e `regravar-falas.mjs` ainda leem as chaves das variáveis de ambiente, não do `.env`.
 
+## Skills e plugins
+Instalados para o usuário (`~/.claude/skills` e plugins); valem aqui também.
+- **Planejar:** `/grilling` (ou `/grill-me`) antes de mudanças grandes no painel, no briefing ou no `nexo`. Só comece a editar depois que o plano for aprovado.
+- **Testes:** `tdd` para código novo; `/handoff` para passar o trabalho a outra sessão.
+- **Código enxuto:** `karpathy-guidelines`: mudanças pequenas, só no que o pedido pede.
+- **Documentação de bibliotecas:** Context7 antes de usar uma API que você não conferiu na versão em uso.
+- **Visual do painel:** `frontend-design` ou `design-taste-frontend` para criar; `web-design-guidelines` e AccessLint (`accessibility-scan`) para revisar. O painel é JS puro, sem React: as skills `vercel-react-*` não se aplicam.
+- **Navegador:** para ver o painel, use o navegador embutido do app ou o `agent-browser`. Nunca envie formulários, faça compras ou ações irreversíveis sem autorização.
+- **Vídeo:** HyperFrames (`/hyperframes`) ou Remotion para animações e vídeos, como a intro. Gere uma prévia antes de renderizar.
+- **Segurança:** o plugin `security-guidance` revisa edições e commits. As skills da Trail of Bits (`insecure-defaults`, `supply-chain-risk-auditor`, `static-analysis`) servem para auditar `server.js`, os `.php` e as dependências.
+- **Skill nova:** procure com `find-skills`, rode `skillspector scan <pasta-ou-url> --no-llm` e peça autorização antes de instalar.
+
 ## Convenções
 - Textos, comentários e mensagens em português do Brasil. O JARVIS chama o usuário de "senhor".
